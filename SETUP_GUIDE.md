@@ -13,6 +13,7 @@ This guide will help you set up and run the Serendib Flutter application from sc
    - Add `C:\src\flutter\bin`
 4. Run `flutter doctor` to verify installation
 
+<!-- skmswd -->
 ### macOS
 ```bash
 # Using Homebrew
