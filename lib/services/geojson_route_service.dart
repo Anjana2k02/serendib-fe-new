@@ -18,12 +18,11 @@ class GeoJsonRouteService {
 
     final features = json['features'] as List<dynamic>;
     if (features.isEmpty) {
-      return (graph: const RouteGraph(nodes: {}, adjacency: {}), bbox: const GeoBBox(minX: 0, maxX: 1, minY: -1, maxY: 0));
+      return (
+        graph: const RouteGraph(nodes: {}, adjacency: {}),
+        bbox: const GeoBBox(minX: 0, maxX: 1, minY: -1, maxY: 0)
+      );
     }
-
-    // The first feature holds the MultiLineString
-    final geometry = features[0]['geometry'] as Map<String, dynamic>;
-    final multiLine = geometry['coordinates'] as List<dynamic>;
 
     final nodes = <String, RouteNode>{};
     final adjacency = <String, List<RouteEdge>>{};
@@ -44,8 +43,21 @@ class GeoJsonRouteService {
       );
     }
 
-    for (final lineRaw in multiLine) {
-      final line = lineRaw as List<dynamic>;
+    final allLines = <List<dynamic>>[];
+    for (final feature in features) {
+      final geometry = feature['geometry'] as Map<String, dynamic>;
+      final type = geometry['type'] as String?;
+      final coordinates = geometry['coordinates'];
+
+      if (coordinates is! List<dynamic>) continue;
+      if (type == 'LineString') {
+        allLines.add(coordinates);
+      } else if (type == 'MultiLineString') {
+        allLines.addAll(coordinates.whereType<List<dynamic>>());
+      }
+    }
+
+    for (final line in allLines) {
       if (line.length < 2) continue;
 
       for (final coordRaw in line) {
@@ -75,9 +87,24 @@ class GeoJsonRouteService {
         final dy = ay - by;
         final weight = sqrt(dx * dx + dy * dy);
 
-        adjacency.putIfAbsent(nodeA.key, () => []).add(RouteEdge(toKey: nodeB.key, weight: weight));
-        adjacency.putIfAbsent(nodeB.key, () => []).add(RouteEdge(toKey: nodeA.key, weight: weight));
+        adjacency
+            .putIfAbsent(nodeA.key, () => [])
+            .add(RouteEdge(toKey: nodeB.key, weight: weight));
+        adjacency
+            .putIfAbsent(nodeB.key, () => [])
+            .add(RouteEdge(toKey: nodeA.key, weight: weight));
       }
+    }
+
+    if (nodes.isEmpty ||
+        !minX.isFinite ||
+        !minY.isFinite ||
+        !maxX.isFinite ||
+        !maxY.isFinite) {
+      return (
+        graph: const RouteGraph(nodes: {}, adjacency: {}),
+        bbox: const GeoBBox(minX: 0, maxX: 1, minY: 0, maxY: 1)
+      );
     }
 
     final bbox = GeoBBox(minX: minX, maxX: maxX, minY: minY, maxY: maxY);
@@ -93,18 +120,24 @@ class GeoJsonRouteService {
 
   /// Converts a tap offset in display space back to raw GeoJSON coordinate space.
   /// [tapLocal] is relative to the top-left of the image as rendered (after letterboxing).
-  static Offset displayToGeo(Offset tapLocal, Size imageDisplaySize, GeoBBox bbox) {
-    final geoX = bbox.minX + (tapLocal.dx / imageDisplaySize.width) * (bbox.maxX - bbox.minX);
+  static Offset displayToGeo(
+      Offset tapLocal, Size imageDisplaySize, GeoBBox bbox) {
+    final geoX = bbox.minX +
+        (tapLocal.dx / imageDisplaySize.width) * (bbox.maxX - bbox.minX);
     // Y is flipped: top of image = maxY (less negative), bottom = minY (more negative)
-    final geoY = bbox.maxY - (tapLocal.dy / imageDisplaySize.height) * (bbox.maxY - bbox.minY);
+    final geoY = bbox.maxY -
+        (tapLocal.dy / imageDisplaySize.height) * (bbox.maxY - bbox.minY);
     return Offset(geoX, geoY);
   }
 
   /// Converts a raw GeoJSON coordinate to display-space offset within the rendered image rect.
-  static Offset geoToDisplay(double geoX, double geoY, Size imageDisplaySize, GeoBBox bbox) {
-    final dx = (geoX - bbox.minX) / (bbox.maxX - bbox.minX) * imageDisplaySize.width;
+  static Offset geoToDisplay(
+      double geoX, double geoY, Size imageDisplaySize, GeoBBox bbox) {
+    final dx =
+        (geoX - bbox.minX) / (bbox.maxX - bbox.minX) * imageDisplaySize.width;
     // Flip Y
-    final dy = (bbox.maxY - geoY) / (bbox.maxY - bbox.minY) * imageDisplaySize.height;
+    final dy =
+        (bbox.maxY - geoY) / (bbox.maxY - bbox.minY) * imageDisplaySize.height;
     return Offset(dx, dy);
   }
 

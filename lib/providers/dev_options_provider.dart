@@ -35,16 +35,16 @@ class DevOptionsProvider extends ChangeNotifier {
   // ---- Current artifact context ----
   String? _nearbyArtifactName;
   int? _nearbyCategoryId;
-  int? _nearbyArtifactId;       // location/artifact id for API call
+  int? _nearbyArtifactId; // location/artifact id for API call
 
   // ---- UI tick timer (50ms) ----
   Timer? _uiTimer;
-  int _sessionBaseMs = 0;       // category total at session start
+  int _sessionBaseMs = 0; // category total at session start
   DateTime? _sessionStart;
 
   // ---- Backend sync timer (5s) ----
   Timer? _syncTimer;
-  int _lastSyncedMs = 0;        // what we last sent to backend
+  int _lastSyncedMs = 0; // what we last sent to backend
 
   final UserScoreService _userScoreService = UserScoreService();
 
@@ -89,8 +89,15 @@ class DevOptionsProvider extends ChangeNotifier {
   }
 
   /// All per-category dwell entries (for overlay display).
-  List<CategoryDwellEntry> get allCategoryDwells =>
-      _categoryDwell.values.toList();
+  List<CategoryDwellEntry> get allCategoryDwells {
+    final entries = _categoryDwell.values.toList();
+    entries.sort((a, b) {
+      final byTime = b.dwellTimeMs.compareTo(a.dwellTimeMs);
+      if (byTime != 0) return byTime;
+      return a.categoryId.compareTo(b.categoryId);
+    });
+    return entries;
+  }
 
   // ---- Setters ----
 
@@ -127,7 +134,8 @@ class DevOptionsProvider extends ChangeNotifier {
 
   /// Called by IndoorMapScreen when a nearby artifact is detected.
   /// [artifactLocationId] is the location `id` from location.geojson (used as artifactId in API).
-  void setNearbyArtifact(String artifactName, int? categoryId, {int? artifactLocationId}) {
+  void setNearbyArtifact(String artifactName, int? categoryId,
+      {int? artifactLocationId}) {
     final previousCategoryId = _nearbyCategoryId;
     final categoryChanged = categoryId != previousCategoryId;
 
@@ -270,18 +278,17 @@ class DevOptionsProvider extends ChangeNotifier {
     // Fire-and-forget POST — errors are logged but don't break the UI
     _userScoreService
         .trackDwellTime(
-          artifactId: artifactId,
-          durationMs: delta,
-        )
+      artifactId: artifactId,
+      durationMs: delta,
+    )
         .then((_) {
-          debugPrint(
-              '[DwellSync] ✓ Synced ${delta}ms for category $_nearbyCategoryId (artifact $artifactId)');
-        })
-        .catchError((e) {
-          debugPrint('[DwellSync] ✗ POST failed: $e');
-          // Revert the sync pointer so we retry on next tick
-          _lastSyncedMs -= delta;
-        });
+      debugPrint(
+          '[DwellSync] ✓ Synced ${delta}ms for category $_nearbyCategoryId (artifact $artifactId)');
+    }).catchError((e) {
+      debugPrint('[DwellSync] ✗ POST failed: $e');
+      // Revert the sync pointer so we retry on next tick
+      _lastSyncedMs -= delta;
+    });
   }
 
   @override

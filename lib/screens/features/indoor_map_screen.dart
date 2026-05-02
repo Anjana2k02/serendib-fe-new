@@ -41,23 +41,27 @@ const _kCreamBrown = Color(0xFFBCAAA4);
 // ---------------------------------------------------------------------------
 IconData _categoryIcon(String name) {
   final n = name.toLowerCase();
-  if (n.contains('ancient') || n.contains('artifact')) return Icons.auto_awesome;
+  if (n.contains('ancient') || n.contains('artifact'))
+    return Icons.auto_awesome;
   if (n.contains('coin')) return Icons.monetization_on;
   if (n.contains('traditional') || n.contains('art')) return Icons.palette;
   if (n.contains('architect')) return Icons.account_balance;
   if (n.contains('kandy')) return Icons.history_edu;
   if (n.contains('king') || n.contains('royal')) return Icons.workspace_premium;
   if (n.contains('culture')) return Icons.language;
-  if (n.contains('statue') || n.contains('skulture')) return Icons.accessibility_new;
+  if (n.contains('statue') || n.contains('skulture'))
+    return Icons.accessibility_new;
   if (n.contains('tech')) return Icons.precision_manufacturing;
   return Icons.place;
 }
 
 Color _categoryColor(String name) {
   final n = name.toLowerCase();
-  if (n.contains('ancient') || n.contains('artifact')) return const Color(0xFF5D4037);
+  if (n.contains('ancient') || n.contains('artifact'))
+    return const Color(0xFF5D4037);
   if (n.contains('coin')) return const Color(0xFF6D4C41);
-  if (n.contains('traditional') || n.contains('art')) return const Color(0xFF795548);
+  if (n.contains('traditional') || n.contains('art'))
+    return const Color(0xFF795548);
   if (n.contains('architect')) return const Color(0xFF4E342E);
   if (n.contains('kandy')) return const Color(0xFF5D4037);
   if (n.contains('king') || n.contains('royal')) return const Color(0xFF4A2C2A);
@@ -79,7 +83,8 @@ IconData _utilityIcon(String name) {
 
 Color _utilityColor(String name) {
   final n = name.toLowerCase();
-  if (n.contains('entran') || n.contains('entrance')) return const Color(0xFF2E7D32);
+  if (n.contains('entran') || n.contains('entrance'))
+    return const Color(0xFF2E7D32);
   if (n.contains('exit')) return const Color(0xFFC62828);
   if (n.contains('toilet') || n.contains('wc')) return const Color(0xFF1565C0);
   if (n.contains('ticket')) return const Color(0xFFE65100);
@@ -115,6 +120,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   bool _isNavigating = false;
   List<Offset> _navigationPath = [];
   List<_MapLocation> _navigationStops = []; // Points in visit order
+  Set<int> _activeNavigationCategoryIds = {};
   final OnboardingApiService _onboardingService = OnboardingApiService();
 
   bool isLoading = true;
@@ -228,8 +234,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     final loc = userLoc ?? _selectedUserLocation;
     if (loc == null) return;
 
-    final act =
-        activity ?? context.read<DevOptionsProvider>().selectedActivity;
+    final act = activity ?? context.read<DevOptionsProvider>().selectedActivity;
 
     if (act.toLowerCase() != 'standing') {
       debugPrint('[Proximity] Activity="$act" — skipping check.');
@@ -294,8 +299,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                   ),
                   Text(
                     'Category ID: ${loc.cId}  •  ${distance.toStringAsFixed(0)}px away',
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 12),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ],
               ),
@@ -304,13 +308,11 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
         ),
         backgroundColor: _kMedBrown,
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         duration: const Duration(seconds: 4),
       ),
     );
   }
-
 
   // -------------------------------------------------------------------------
   // Data loading
@@ -399,8 +401,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   }
 
   Future<void> _loadOtherLocations() async {
-    final raw =
-        await rootBundle.loadString('assets/map-routes/other.geojson');
+    final raw = await rootBundle.loadString('assets/map-routes/other.geojson');
     final data = jsonDecode(raw) as Map<String, dynamic>;
     final features = data['features'] as List<dynamic>;
     final locs = <_MapLocation>[];
@@ -420,8 +421,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   }
 
   Future<void> _loadUserLocations() async {
-    final raw =
-        await rootBundle.loadString('assets/user/userlocation.geojson');
+    final raw = await rootBundle.loadString('assets/user/userlocation.geojson');
     final data = jsonDecode(raw) as Map<String, dynamic>;
     final features = data['features'] as List<dynamic>;
     final locs = <_MapLocation>[];
@@ -444,7 +444,8 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     try {
       final response = await _onboardingService.getOnboardingResponse();
       if (response != null && response['interests'] != null) {
-        _userInterests = (response['interests'] as List).map((e) => e.toString()).toList();
+        _userInterests =
+            (response['interests'] as List).map((e) => e.toString()).toList();
       }
     } catch (e) {
       debugPrint('Failed to load user interests: $e');
@@ -535,7 +536,8 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                                 if (_navigationPath.isNotEmpty)
                                   CustomPaint(
                                     size: const Size(mapWidth, mapHeight),
-                                    painter: _NavigationPainter(path: _navigationPath),
+                                    painter: _NavigationPainter(
+                                        path: _navigationPath),
                                   ),
                                 // Utility markers (other.geojson)
                                 ..._otherLocations
@@ -545,7 +547,8 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                                     .map((loc) => _buildCategoryMarker(loc)),
                                 // Selected user location marker
                                 if (_selectedUserLocation != null)
-                                  _buildUserLocationMarker(_selectedUserLocation!),
+                                  _buildUserLocationMarker(
+                                      _selectedUserLocation!),
                               ],
                             ),
                           ),
@@ -616,13 +619,15 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     final lower = interest.toLowerCase();
     if (lower.contains('coin')) return 1;
     if (lower.contains('ancient') || lower.contains('artifact')) return 2;
-    if (lower.contains('kandy') || lower.contains('king') || lower.contains('royal')) return 3;
+    if (lower.contains('kandy') ||
+        lower.contains('king') ||
+        lower.contains('royal')) return 3;
     if (lower.contains('statue')) return 6;
     if (lower.contains('culture')) return 7;
     if (lower.contains('tech')) return 8;
     if (lower.contains('architect')) return 9;
     if (lower.contains('traditional') || lower.contains('art')) return 10;
-    
+
     for (final loc in _locations) {
       if (loc.cId != null && loc.name.toLowerCase() == lower) {
         return loc.cId;
@@ -637,17 +642,21 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
         _isNavigating = false;
         _navigationPath.clear();
         _navigationStops.clear();
+        _activeNavigationCategoryIds.clear();
       });
     } else {
       if (_selectedUserLocation == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a start location from the Dev Bar first.')),
+          const SnackBar(
+              content: Text(
+                  'Please select a start location from the Dev Bar first.')),
         );
         return;
       }
       if (_userInterests.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No interests found from your profile.')),
+          const SnackBar(
+              content: Text('No interests found from your profile.')),
         );
         return;
       }
@@ -657,6 +666,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
 
   void _calculateRoute() {
     if (_selectedUserLocation == null || _routeGraph == null) return;
+    final snappedStart = _nearestRouteAnchor(_selectedUserLocation!);
 
     Set<int> selectedCIds = {};
     for (String interest in _userInterests) {
@@ -667,38 +677,25 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     }
 
     if (selectedCIds.isEmpty) return;
-    if (selectedCIds.length > 3) {
-      selectedCIds = selectedCIds.take(3).toSet();
-    }
-
-    final targetsByCid = <int, List<_MapLocation>>{};
-    for (final cid in selectedCIds) {
-      targetsByCid[cid] = _locations.where((l) => l.cId == cid).toList();
-    }
-
-    _MapLocation current = _selectedUserLocation!;
-    final List<_MapLocation> categoryBest = [];
-    for (final cid in selectedCIds) {
-      final list = targetsByCid[cid]!;
-      if (list.isEmpty) continue;
-
-      _MapLocation? nearest;
-      double minDist = double.infinity;
-      for (final loc in list) {
-        final dist = pow(loc.px - current.px, 2) + pow(loc.py - current.py, 2);
-        if (dist < minDist) {
-          minDist = dist.toDouble();
-          nearest = loc;
-        }
-      }
-      if (nearest != null) categoryBest.add(nearest);
+    final remainingTargets = _locations
+        .where((loc) => loc.cId != null && selectedCIds.contains(loc.cId))
+        .toList();
+    if (remainingTargets.isEmpty) {
+      setState(() {
+        _navigationPath = [];
+        _navigationStops = [];
+        _isNavigating = false;
+        _activeNavigationCategoryIds = {};
+      });
+      return;
     }
 
     final List<_MapLocation> visitOrder = [];
-    while (categoryBest.isNotEmpty) {
+    _MapLocation current = snappedStart;
+    while (remainingTargets.isNotEmpty) {
       _MapLocation? nextLoc;
       double minDist = double.infinity;
-      for (final loc in categoryBest) {
+      for (final loc in remainingTargets) {
         final dist = pow(loc.px - current.px, 2) + pow(loc.py - current.py, 2);
         if (dist < minDist) {
           minDist = dist.toDouble();
@@ -707,7 +704,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
       }
       if (nextLoc != null) {
         visitOrder.add(nextLoc);
-        categoryBest.remove(nextLoc);
+        remainingTargets.remove(nextLoc);
         current = nextLoc;
       } else {
         break;
@@ -715,13 +712,23 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     }
 
     final List<Offset> mergedPath = [];
-    _MapLocation start = _selectedUserLocation!;
+    _MapLocation start = snappedStart;
     for (final end in visitOrder) {
       final res = _routeGraph!.snapAndPath(
-        fromX: start.px, fromY: start.py,
-        toX: end.px, toY: end.py,
+        fromX: start.px,
+        fromY: start.py,
+        toX: end.px,
+        toY: end.py,
       );
       if (res != null && res.hasPath) {
+        if (mergedPath.isEmpty) {
+          mergedPath.add(
+              Offset(_selectedUserLocation!.px, _selectedUserLocation!.py));
+          if ((res.fromSnap.canvasX - _selectedUserLocation!.px).abs() > 0.5 ||
+              (res.fromSnap.canvasY - _selectedUserLocation!.py).abs() > 0.5) {
+            mergedPath.add(Offset(res.fromSnap.canvasX, res.fromSnap.canvasY));
+          }
+        }
         final seg = res.path.map((n) => Offset(n.canvasX, n.canvasY)).toList();
         if (mergedPath.isNotEmpty && seg.isNotEmpty) {
           mergedPath.addAll(seg.skip(1));
@@ -735,8 +742,34 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     setState(() {
       _navigationPath = mergedPath;
       _navigationStops = visitOrder;
+      _activeNavigationCategoryIds = selectedCIds;
       _isNavigating = true;
     });
+  }
+
+  _MapLocation _nearestRouteAnchor(_MapLocation source) {
+    final nearestNode = _routeGraph?.nearestNode(source.px, source.py);
+    if (nearestNode == null) return source;
+
+    return _MapLocation(
+      id: source.id,
+      cId: source.cId,
+      name: source.name,
+      px: nearestNode.canvasX,
+      py: nearestNode.canvasY,
+    );
+  }
+
+  void _updateSelectedUserLocation(_MapLocation newLoc) {
+    setState(() {
+      _selectedUserLocation = newLoc;
+    });
+
+    _checkNearbyArtifacts(userLoc: newLoc);
+
+    if (_isNavigating) {
+      _calculateRoute();
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -749,13 +782,22 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     final icon = _categoryIcon(loc.name);
     const double size = 38;
 
-    int stopIndex = _navigationStops.indexOf(loc);
-    bool isStop = stopIndex != -1;
-
-    // Hide non-selected category markers during navigation
-    if (_isNavigating && !isStop) {
-      return const SizedBox.shrink();
-    }
+    final stopIndex = _navigationStops.indexOf(loc);
+    final isStop = stopIndex != -1;
+    final isSelectedCategory = _isNavigating &&
+        loc.cId != null &&
+        _activeNavigationCategoryIds.contains(loc.cId);
+    final isMuted = _isNavigating && !isSelectedCategory;
+    final markerColor =
+        isMuted ? Color.lerp(color, Colors.grey.shade500, 0.6)! : color;
+    final labelColor =
+        isMuted ? Color.lerp(color, Colors.grey.shade600, 0.7)! : color;
+    final iconColor =
+        isMuted ? Colors.white.withValues(alpha: 0.82) : Colors.white;
+    final borderColor =
+        isMuted ? Colors.white.withValues(alpha: 0.78) : Colors.white;
+    final shadowAlpha = isMuted ? 0.22 : 0.55;
+    final labelAlpha = isMuted ? 0.74 : 0.92;
 
     return Positioned(
       left: loc.px - size / 2,
@@ -779,28 +821,31 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Color.lerp(color, Colors.white, 0.25)!,
-                        color,
-                        Color.lerp(color, _kDarkBrown, 0.4)!,
+                        Color.lerp(
+                            markerColor, Colors.white, isMuted ? 0.12 : 0.25)!,
+                        markerColor,
+                        Color.lerp(
+                            markerColor, _kDarkBrown, isMuted ? 0.2 : 0.4)!,
                       ],
                     ),
-                    border: Border.all(color: Colors.white, width: 2),
+                    border: Border.all(color: borderColor, width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: color.withValues(alpha: 0.55),
-                        blurRadius: 8,
-                        spreadRadius: 1,
+                        color: markerColor.withValues(alpha: shadowAlpha),
+                        blurRadius: isMuted ? 4 : 8,
+                        spreadRadius: isMuted ? 0 : 1,
                         offset: const Offset(0, 3),
                       ),
                       BoxShadow(
-                        color: Colors.white.withValues(alpha: 0.4),
-                        blurRadius: 2,
+                        color: Colors.white
+                            .withValues(alpha: isMuted ? 0.18 : 0.4),
+                        blurRadius: isMuted ? 1 : 2,
                         spreadRadius: 0,
                         offset: const Offset(-1, -1),
                       ),
                     ],
                   ),
-                  child: Icon(icon, color: Colors.white, size: 20),
+                  child: Icon(icon, color: iconColor, size: 20),
                 ),
                 if (isStop)
                   Positioned(
@@ -809,16 +854,19 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(5),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade700,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 1.5),
-                        boxShadow: const [
-                          BoxShadow(color: Colors.black26, blurRadius: 4)
-                        ]
-                      ),
+                          color: Colors.red.shade700,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                          boxShadow: const [
+                            BoxShadow(color: Colors.black26, blurRadius: 4)
+                          ]),
                       child: Text(
                         '${stopIndex + 1}',
-                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, height: 1),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            height: 1),
                       ),
                     ),
                   ),
@@ -828,15 +876,15 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
             // Name label
             Container(
               constraints: const BoxConstraints(maxWidth: 80),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.92),
+                color: labelColor.withValues(alpha: labelAlpha),
                 borderRadius: BorderRadius.circular(6),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.25),
-                    blurRadius: 3,
+                    color:
+                        Colors.black.withValues(alpha: isMuted ? 0.14 : 0.25),
+                    blurRadius: isMuted ? 2 : 3,
                     offset: const Offset(0, 1),
                   ),
                 ],
@@ -899,8 +947,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
             // Name label
             Container(
               constraints: const BoxConstraints(maxWidth: 64),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.88),
                 borderRadius: BorderRadius.circular(5),
@@ -999,16 +1046,12 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
             iconEnabledColor: Colors.white70,
             items: _userLocations
                 .map((l) => DropdownMenuItem(
-                    value: l.name,
-                    child: Text(l.name, style: dropdownStyle)))
+                    value: l.name, child: Text(l.name, style: dropdownStyle)))
                 .toList(),
             onChanged: (v) {
               if (v != null) {
                 final newLoc = _userLocations.firstWhere((l) => l.name == v);
-                setState(() {
-                  _selectedUserLocation = newLoc;
-                });
-                _checkNearbyArtifacts(userLoc: newLoc);
+                _updateSelectedUserLocation(newLoc);
               }
             },
           ),
@@ -1081,8 +1124,7 @@ class _NetworkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_NetworkPainter old) =>
-      old.routeSegments != routeSegments;
+  bool shouldRepaint(_NetworkPainter old) => old.routeSegments != routeSegments;
 }
 
 class _NavigationPainter extends CustomPainter {
