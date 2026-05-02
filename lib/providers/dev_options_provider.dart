@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 /// Provider for Developer Options including dwell time tracking.
 /// Tracks how long a user is "standing" near an artifact in milliseconds.
 class DevOptionsProvider extends ChangeNotifier {
-  bool _developerOptionsEnabled = false;
+  bool _developerOptionsEnabled = true;
   String _selectedLocation = 'Location A';
   String _selectedActivity = 'Standing';
 
