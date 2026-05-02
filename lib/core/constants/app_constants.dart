@@ -63,6 +63,7 @@ class AppConstants {
   static String get artifactsEndpoint => '$apiBaseUrl/artifacts';
   static String get feedbackEndpoint => '$apiBaseUrl/feedback';
   static String get usersEndpoint => '$apiBaseUrl/users';
+  static String get userScoresEndpoint => '$apiBaseUrl/user-scores';
 
   // FastAPI ML Backend
   static const String mlBaseUrl = 'http://192.168.1.170:8000';

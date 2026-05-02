@@ -5,7 +5,8 @@ import '../../core/constants/app_constants.dart';
 import '../../providers/dev_options_provider.dart';
 
 /// Live dwell time overlay displayed at the bottom-right corner of the screen.
-/// Only visible when developer options are enabled and the user is in "Standing" mode.
+/// Only visible when developer options are enabled and the user is in "Standing" mode
+/// near an artifact. Shows per-category accumulated dwell time in real time.
 class DwellTimeOverlay extends StatelessWidget {
   const DwellTimeOverlay({super.key});
 
@@ -13,223 +14,379 @@ class DwellTimeOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<DevOptionsProvider>(
       builder: (context, devOptions, child) {
-        // Only show when developer options are enabled
         if (!devOptions.developerOptionsEnabled) {
           return const SizedBox.shrink();
         }
 
         final isStanding =
             devOptions.selectedActivity.toLowerCase() == 'standing';
-        final dwellMs = devOptions.dwellTimeMs;
         final nearbyArtifact = devOptions.nearbyArtifactName;
         final nearbyCategoryId = devOptions.nearbyCategoryId;
+        final allDwells = devOptions.allCategoryDwells;
 
         return Positioned(
           bottom: AppConstants.spacingLg,
           right: AppConstants.spacingMd,
-          child: AnimatedOpacity(
-            opacity: 1.0,
-            duration: AppConstants.animationNormal,
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 220),
-              decoration: BoxDecoration(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 240),
+            decoration: BoxDecoration(
+              color: isStanding
+                  ? AppColors.darkBrown.withValues(alpha: 0.95)
+                  : Colors.grey.shade800.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+              border: Border.all(
                 color: isStanding
-                    ? AppColors.darkBrown.withOpacity(0.95)
-                    : Colors.grey.shade800.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(AppConstants.radiusMd),
-                border: Border.all(
-                  color: isStanding
-                      ? AppColors.accentGold.withOpacity(0.6)
-                      : Colors.grey.shade600,
-                  width: 1.5,
+                    ? AppColors.accentGold.withValues(alpha: 0.6)
+                    : Colors.grey.shade600,
+                width: 1.5,
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x55000000),
+                  blurRadius: 14,
+                  offset: Offset(0, 4),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.35),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Header ──
+                _Header(isStanding: isStanding, nearbyArtifact: nearbyArtifact),
+
+                // ── Active category timer ──
+                if (nearbyArtifact != null && nearbyCategoryId != null)
+                  _ActiveTimer(
+                    devOptions: devOptions,
+                    isStanding: isStanding,
+                    categoryId: nearbyCategoryId,
+                    artifactName: nearbyArtifact,
+                  ),
+
+                // ── History: all categories visited ──
+                if (allDwells.isNotEmpty) ...[
+                  const Divider(color: Colors.white12, height: 1),
+                  _CategoryHistory(
+                    entries: allDwells,
+                    activeCategoryId: nearbyCategoryId,
                   ),
                 ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppConstants.spacingSm + 2,
-                      vertical: AppConstants.spacingXs + 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isStanding
-                          ? AppColors.accentGold.withOpacity(0.15)
-                          : Colors.grey.withOpacity(0.15),
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(AppConstants.radiusMd - 1),
-                        topRight: Radius.circular(AppConstants.radiusMd - 1),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.developer_mode,
-                          color: AppColors.accentGold,
-                          size: 14,
-                        ),
-                        const SizedBox(width: 4),
-                        const Text(
-                          'DWELL TIME',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const Spacer(),
-                        // Live indicator
-                        if (isStanding && nearbyArtifact != null)
-                          _PulsingDot(color: AppColors.success),
-                      ],
-                    ),
-                  ),
-                  // Body
-                  Padding(
-                    padding: const EdgeInsets.all(AppConstants.spacingSm + 2),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Timer display
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              isStanding ? Icons.timer : Icons.timer_off,
-                              color: isStanding
-                                  ? AppColors.accentGold
-                                  : Colors.grey.shade500,
-                              size: 22,
-                            ),
-                            const SizedBox(width: AppConstants.spacingSm),
-                            Text(
-                              _formatDwellTime(dwellMs),
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'monospace',
-                                letterSpacing: 1,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        // Milliseconds
-                        Text(
-                          '${dwellMs}ms',
-                          style: TextStyle(
-                            color: Colors.white38,
-                            fontSize: 10,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        const SizedBox(height: AppConstants.spacingSm),
-                        // Status row
-                        _InfoRow(
-                          label: 'Activity',
-                          value: devOptions.selectedActivity,
-                          valueColor: isStanding
-                              ? AppColors.success
-                              : AppColors.warning,
-                        ),
-                        const SizedBox(height: 3),
-                        _InfoRow(
-                          label: 'Artifact',
-                          value: nearbyArtifact ?? '—',
-                          valueColor: nearbyArtifact != null
-                              ? Colors.white
-                              : Colors.white38,
-                        ),
-                        const SizedBox(height: 3),
-                        _InfoRow(
-                          label: 'Cat. ID',
-                          value: nearbyCategoryId != null
-                              ? '#$nearbyCategoryId'
-                              : '—',
-                          valueColor: nearbyCategoryId != null
-                              ? AppColors.softGold
-                              : Colors.white38,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+
+                // ── Sync status ──
+                _SyncStatus(isStanding: isStanding, hasCategoryId: nearbyCategoryId != null),
+              ],
             ),
           ),
         );
       },
     );
   }
-
-  String _formatDwellTime(int ms) {
-    final totalSeconds = ms ~/ 1000;
-    final minutes = totalSeconds ~/ 60;
-    final seconds = totalSeconds % 60;
-    final millis = (ms % 1000) ~/ 10; // show hundredths
-    return '${minutes.toString().padLeft(2, '0')}:'
-        '${seconds.toString().padLeft(2, '0')}.'
-        '${millis.toString().padLeft(2, '0')}';
-  }
 }
 
-/// A simple info row with label: value.
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color valueColor;
+// ── Header ─────────────────────────────────────────────────────────────────
+class _Header extends StatelessWidget {
+  final bool isStanding;
+  final String? nearbyArtifact;
 
-  const _InfoRow({
-    required this.label,
-    required this.value,
-    required this.valueColor,
-  });
+  const _Header({required this.isStanding, required this.nearbyArtifact});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          '$label: ',
-          style: const TextStyle(
-            color: Colors.white54,
-            fontSize: 11,
-          ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isStanding
+            ? AppColors.accentGold.withValues(alpha: 0.12)
+            : Colors.white.withValues(alpha: 0.05),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(AppConstants.radiusMd - 1),
+          topRight: Radius.circular(AppConstants.radiusMd - 1),
         ),
-        Flexible(
-          child: Text(
-            value,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.developer_mode, color: AppColors.accentGold, size: 13),
+          const SizedBox(width: 5),
+          const Text(
+            'DWELL TRACKER',
             style: TextStyle(
-              color: valueColor,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+              color: Colors.white70,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.1,
             ),
-            overflow: TextOverflow.ellipsis,
           ),
-        ),
-      ],
+          const Spacer(),
+          if (isStanding && nearbyArtifact != null) const _PulsingDot(),
+        ],
+      ),
     );
   }
 }
 
-/// A small pulsing green dot to indicate live tracking.
-class _PulsingDot extends StatefulWidget {
+// ── Active category timer ───────────────────────────────────────────────────
+class _ActiveTimer extends StatelessWidget {
+  final DevOptionsProvider devOptions;
+  final bool isStanding;
+  final int categoryId;
+  final String artifactName;
+
+  const _ActiveTimer({
+    required this.devOptions,
+    required this.isStanding,
+    required this.categoryId,
+    required this.artifactName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ms = devOptions.dwellTimeMs;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Timer display
+          Row(
+            children: [
+              Icon(
+                isStanding ? Icons.timer : Icons.timer_off,
+                color: isStanding ? AppColors.accentGold : Colors.grey.shade500,
+                size: 20,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                _formatTime(ms),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'monospace',
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${ms}ms',
+            style: const TextStyle(
+              color: Colors.white30,
+              fontSize: 10,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Category row
+          Row(
+            children: [
+              _Badge(
+                label: 'c_id',
+                value: '#$categoryId',
+                color: AppColors.softGold,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  artifactName,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(int ms) {
+    final s = ms ~/ 1000;
+    final m = s ~/ 60;
+    final cents = (ms % 1000) ~/ 10;
+    return '${m.toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}.${cents.toString().padLeft(2, '0')}';
+  }
+}
+
+// ── Category history ────────────────────────────────────────────────────────
+class _CategoryHistory extends StatelessWidget {
+  final List<CategoryDwellEntry> entries;
+  final int? activeCategoryId;
+
+  const _CategoryHistory({
+    required this.entries,
+    required this.activeCategoryId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'CATEGORY DWELL LOG',
+            style: TextStyle(
+              color: Colors.white30,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+            ),
+          ),
+          const SizedBox(height: 4),
+          ...entries.map((e) => _CategoryRow(
+                entry: e,
+                isActive: e.categoryId == activeCategoryId,
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryRow extends StatelessWidget {
+  final CategoryDwellEntry entry;
+  final bool isActive;
+
+  const _CategoryRow({required this.entry, required this.isActive});
+
+  @override
+  Widget build(BuildContext context) {
+    final ms = entry.dwellTimeMs;
+    final s = (ms / 1000).toStringAsFixed(1);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          // Active indicator
+          Container(
+            width: 6,
+            height: 6,
+            margin: const EdgeInsets.only(right: 5),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isActive ? AppColors.success : Colors.white24,
+            ),
+          ),
+          _Badge(
+            label: 'c_id',
+            value: '#${entry.categoryId}',
+            color: isActive ? AppColors.softGold : Colors.white38,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              entry.artifactName,
+              style: TextStyle(
+                color: isActive ? Colors.white70 : Colors.white38,
+                fontSize: 10,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text(
+            '${s}s',
+            style: TextStyle(
+              color: isActive ? Colors.white : Colors.white38,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Sync status bar ─────────────────────────────────────────────────────────
+class _SyncStatus extends StatelessWidget {
+  final bool isStanding;
+  final bool hasCategoryId;
+
+  const _SyncStatus({required this.isStanding, required this.hasCategoryId});
+
+  @override
+  Widget build(BuildContext context) {
+    final syncing = isStanding && hasCategoryId;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: const BoxDecoration(
+        color: Color(0x18FFFFFF),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(AppConstants.radiusMd - 1),
+          bottomRight: Radius.circular(AppConstants.radiusMd - 1),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            syncing ? Icons.sync : Icons.sync_disabled,
+            color: syncing ? AppColors.success : Colors.white24,
+            size: 11,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            syncing ? 'Syncing to backend every 5s' : 'Sync paused',
+            style: TextStyle(
+              color: syncing ? Colors.white54 : Colors.white24,
+              fontSize: 9,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Small badge ─────────────────────────────────────────────────────────────
+class _Badge extends StatelessWidget {
+  final String label;
+  final String value;
   final Color color;
-  const _PulsingDot({required this.color});
+
+  const _Badge({required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label ',
+            style: TextStyle(color: color.withValues(alpha: 0.7), fontSize: 9),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Pulsing dot ──────────────────────────────────────────────────────────────
+class _PulsingDot extends StatefulWidget {
+  const _PulsingDot();
 
   @override
   State<_PulsingDot> createState() => _PulsingDotState();
@@ -237,48 +394,45 @@ class _PulsingDot extends StatefulWidget {
 
 class _PulsingDotState extends State<_PulsingDot>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 1000),
+    _ctrl = AnimationController(
+      duration: const Duration(milliseconds: 900),
       vsync: this,
     )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 0.4, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _anim = Tween<double>(begin: 0.35, end: 1.0)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _animation,
-      builder: (context, child) {
-        return Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: widget.color.withOpacity(_animation.value),
-            boxShadow: [
-              BoxShadow(
-                color: widget.color.withOpacity(_animation.value * 0.5),
-                blurRadius: 4,
-                spreadRadius: 1,
-              ),
-            ],
-          ),
-        );
-      },
+      animation: _anim,
+      builder: (_, __) => Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppColors.success.withValues(alpha: _anim.value),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.success.withValues(alpha: _anim.value * 0.5),
+              blurRadius: 5,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

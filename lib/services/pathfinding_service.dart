@@ -1,6 +1,16 @@
 import 'dart:math';
 import '../models/point_of_interest.dart';
 
+/// DEPRECATED — Do NOT use this service for indoor routing.
+///
+/// This A* implementation requires [PointOfInterest.connectedPOIs] to be
+/// populated for every POI, but [location.geojson] contains no connectivity
+/// data — so this graph is always empty and [findRoute] always returns [].
+///
+/// ✅ Use [RouteGraph.snapAndPath] (via [GeoJsonRouteService.load]) instead.
+/// That system builds its graph directly from [routes.geojson] and works
+/// with the existing canvas-space coordinates out of the box.
+@Deprecated('Use RouteGraph.snapAndPath() via GeoJsonRouteService instead.')
 class PathfindingService {
   List<PointOfInterest> findRoute(
     PointOfInterest start,

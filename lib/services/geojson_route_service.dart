@@ -4,6 +4,11 @@ import 'package:flutter/services.dart';
 import '../models/route_graph.dart';
 
 class GeoJsonRouteService {
+  /// Must match IndoorMapScreen.mapHeight — the pixel height of the indoor map
+  /// raster asset. Used to flip GeoJSON Y (origin = bottom-left) into canvas
+  /// space (origin = top-left), so route graph nodes live in the same
+  /// coordinate system as locations loaded by IndoorMapScreen._loadLocations().
+  static const double _mapHeight = 1281.0;
   static const String _assetPath = 'assets/map-routes/routes.geojson';
 
   /// Loads and parses the GeoJSON, builds the route graph, and computes the bounding box.
@@ -13,12 +18,11 @@ class GeoJsonRouteService {
 
     final features = json['features'] as List<dynamic>;
     if (features.isEmpty) {
-      return (graph: const RouteGraph(nodes: {}, adjacency: {}), bbox: const GeoBBox(minX: 0, maxX: 1, minY: -1, maxY: 0));
+      return (
+        graph: const RouteGraph(nodes: {}, adjacency: {}),
+        bbox: const GeoBBox(minX: 0, maxX: 1, minY: -1, maxY: 0)
+      );
     }
-
-    // The first feature holds the MultiLineString
-    final geometry = features[0]['geometry'] as Map<String, dynamic>;
-    final multiLine = geometry['coordinates'] as List<dynamic>;
 
     final nodes = <String, RouteNode>{};
     final adjacency = <String, List<RouteEdge>>{};
@@ -29,12 +33,31 @@ class GeoJsonRouteService {
     String nodeKey(double x, double y) => '${x.round()}_${y.round()}';
 
     RouteNode getOrCreateNode(double x, double y) {
+      // Node key uses raw GeoJSON coords for stable uniqueness within this file.
+      // Stored canvasX/canvasY are flipped to canvas space so that nearestNode()
+      // can accept canvas-space px/py values directly from _MapLocation.
       final key = nodeKey(x, y);
-      return nodes.putIfAbsent(key, () => RouteNode(key: key, geoX: x, geoY: y));
+      return nodes.putIfAbsent(
+        key,
+        () => RouteNode(key: key, canvasX: x, canvasY: _mapHeight - y),
+      );
     }
 
-    for (final lineRaw in multiLine) {
-      final line = lineRaw as List<dynamic>;
+    final allLines = <List<dynamic>>[];
+    for (final feature in features) {
+      final geometry = feature['geometry'] as Map<String, dynamic>;
+      final type = geometry['type'] as String?;
+      final coordinates = geometry['coordinates'];
+
+      if (coordinates is! List<dynamic>) continue;
+      if (type == 'LineString') {
+        allLines.add(coordinates);
+      } else if (type == 'MultiLineString') {
+        allLines.addAll(coordinates.whereType<List<dynamic>>());
+      }
+    }
+
+    for (final line in allLines) {
       if (line.length < 2) continue;
 
       for (final coordRaw in line) {
@@ -64,29 +87,57 @@ class GeoJsonRouteService {
         final dy = ay - by;
         final weight = sqrt(dx * dx + dy * dy);
 
-        adjacency.putIfAbsent(nodeA.key, () => []).add(RouteEdge(toKey: nodeB.key, weight: weight));
-        adjacency.putIfAbsent(nodeB.key, () => []).add(RouteEdge(toKey: nodeA.key, weight: weight));
+        adjacency
+            .putIfAbsent(nodeA.key, () => [])
+            .add(RouteEdge(toKey: nodeB.key, weight: weight));
+        adjacency
+            .putIfAbsent(nodeB.key, () => [])
+            .add(RouteEdge(toKey: nodeA.key, weight: weight));
       }
+    }
+
+    if (nodes.isEmpty ||
+        !minX.isFinite ||
+        !minY.isFinite ||
+        !maxX.isFinite ||
+        !maxY.isFinite) {
+      return (
+        graph: const RouteGraph(nodes: {}, adjacency: {}),
+        bbox: const GeoBBox(minX: 0, maxX: 1, minY: 0, maxY: 1)
+      );
     }
 
     final bbox = GeoBBox(minX: minX, maxX: maxX, minY: minY, maxY: maxY);
     return (graph: RouteGraph(nodes: nodes, adjacency: adjacency), bbox: bbox);
   }
 
-  /// Converts a tap offset in display space back to GeoJSON coordinate space.
+  // ---------------------------------------------------------------------------
+  // Coordinate converters (raw GeoJSON space ↔ display space)
+  // NOTE: These helpers operate in raw GeoJSON coordinate space (Y not flipped).
+  // They are kept for legacy use and are independent of the route graph nodes,
+  // which are stored in canvas space after the Y-flip applied in load().
+  // ---------------------------------------------------------------------------
+
+  /// Converts a tap offset in display space back to raw GeoJSON coordinate space.
   /// [tapLocal] is relative to the top-left of the image as rendered (after letterboxing).
-  static Offset displayToGeo(Offset tapLocal, Size imageDisplaySize, GeoBBox bbox) {
-    final geoX = bbox.minX + (tapLocal.dx / imageDisplaySize.width) * (bbox.maxX - bbox.minX);
+  static Offset displayToGeo(
+      Offset tapLocal, Size imageDisplaySize, GeoBBox bbox) {
+    final geoX = bbox.minX +
+        (tapLocal.dx / imageDisplaySize.width) * (bbox.maxX - bbox.minX);
     // Y is flipped: top of image = maxY (less negative), bottom = minY (more negative)
-    final geoY = bbox.maxY - (tapLocal.dy / imageDisplaySize.height) * (bbox.maxY - bbox.minY);
+    final geoY = bbox.maxY -
+        (tapLocal.dy / imageDisplaySize.height) * (bbox.maxY - bbox.minY);
     return Offset(geoX, geoY);
   }
 
-  /// Converts a GeoJSON coordinate to display-space offset within the rendered image rect.
-  static Offset geoToDisplay(double geoX, double geoY, Size imageDisplaySize, GeoBBox bbox) {
-    final dx = (geoX - bbox.minX) / (bbox.maxX - bbox.minX) * imageDisplaySize.width;
+  /// Converts a raw GeoJSON coordinate to display-space offset within the rendered image rect.
+  static Offset geoToDisplay(
+      double geoX, double geoY, Size imageDisplaySize, GeoBBox bbox) {
+    final dx =
+        (geoX - bbox.minX) / (bbox.maxX - bbox.minX) * imageDisplaySize.width;
     // Flip Y
-    final dy = (bbox.maxY - geoY) / (bbox.maxY - bbox.minY) * imageDisplaySize.height;
+    final dy =
+        (bbox.maxY - geoY) / (bbox.maxY - bbox.minY) * imageDisplaySize.height;
     return Offset(dx, dy);
   }
 
