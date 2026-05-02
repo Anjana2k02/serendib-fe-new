@@ -4,6 +4,11 @@ import 'package:flutter/services.dart';
 import '../models/route_graph.dart';
 
 class GeoJsonRouteService {
+  /// Must match IndoorMapScreen.mapHeight — the pixel height of the indoor map
+  /// raster asset. Used to flip GeoJSON Y (origin = bottom-left) into canvas
+  /// space (origin = top-left), so route graph nodes live in the same
+  /// coordinate system as locations loaded by IndoorMapScreen._loadLocations().
+  static const double _mapHeight = 1281.0;
   static const String _assetPath = 'assets/map-routes/routes.geojson';
 
   /// Loads and parses the GeoJSON, builds the route graph, and computes the bounding box.
@@ -29,8 +34,14 @@ class GeoJsonRouteService {
     String nodeKey(double x, double y) => '${x.round()}_${y.round()}';
 
     RouteNode getOrCreateNode(double x, double y) {
+      // Node key uses raw GeoJSON coords for stable uniqueness within this file.
+      // Stored canvasX/canvasY are flipped to canvas space so that nearestNode()
+      // can accept canvas-space px/py values directly from _MapLocation.
       final key = nodeKey(x, y);
-      return nodes.putIfAbsent(key, () => RouteNode(key: key, geoX: x, geoY: y));
+      return nodes.putIfAbsent(
+        key,
+        () => RouteNode(key: key, canvasX: x, canvasY: _mapHeight - y),
+      );
     }
 
     for (final lineRaw in multiLine) {
@@ -73,7 +84,14 @@ class GeoJsonRouteService {
     return (graph: RouteGraph(nodes: nodes, adjacency: adjacency), bbox: bbox);
   }
 
-  /// Converts a tap offset in display space back to GeoJSON coordinate space.
+  // ---------------------------------------------------------------------------
+  // Coordinate converters (raw GeoJSON space ↔ display space)
+  // NOTE: These helpers operate in raw GeoJSON coordinate space (Y not flipped).
+  // They are kept for legacy use and are independent of the route graph nodes,
+  // which are stored in canvas space after the Y-flip applied in load().
+  // ---------------------------------------------------------------------------
+
+  /// Converts a tap offset in display space back to raw GeoJSON coordinate space.
   /// [tapLocal] is relative to the top-left of the image as rendered (after letterboxing).
   static Offset displayToGeo(Offset tapLocal, Size imageDisplaySize, GeoBBox bbox) {
     final geoX = bbox.minX + (tapLocal.dx / imageDisplaySize.width) * (bbox.maxX - bbox.minX);
@@ -82,7 +100,7 @@ class GeoJsonRouteService {
     return Offset(geoX, geoY);
   }
 
-  /// Converts a GeoJSON coordinate to display-space offset within the rendered image rect.
+  /// Converts a raw GeoJSON coordinate to display-space offset within the rendered image rect.
   static Offset geoToDisplay(double geoX, double geoY, Size imageDisplaySize, GeoBBox bbox) {
     final dx = (geoX - bbox.minX) / (bbox.maxX - bbox.minX) * imageDisplaySize.width;
     // Flip Y

@@ -7,6 +7,9 @@ import '../../providers/dev_options_provider.dart';
 import '../../providers/artifact_provider.dart';
 import '../../widgets/category_artifacts_sheet.dart';
 import '../../widgets/navigation/dwell_time_overlay.dart';
+import '../../models/route_graph.dart';
+import '../../services/geojson_route_service.dart';
+import '../../services/onboarding_api_service.dart';
 
 // ---------------------------------------------------------------------------
 // Data models
@@ -105,6 +108,14 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   List<_MapLocation> _otherLocations = [];
   List<_MapLocation> _userLocations = [];
   _MapLocation? _selectedUserLocation;
+
+  // Routing state
+  RouteGraph? _routeGraph;
+  List<String> _userInterests = [];
+  bool _isNavigating = false;
+  List<Offset> _navigationPath = [];
+  List<_MapLocation> _navigationStops = []; // Points in visit order
+  final OnboardingApiService _onboardingService = OnboardingApiService();
 
   bool isLoading = true;
   String errorMessage = '';
@@ -245,7 +256,11 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
           '[Proximity] ✓ Nearby: "${nearest.name}" | c_id=${nearest.cId} | dist=${nearestDist.toStringAsFixed(1)}px');
 
       // Update the dev options provider with the nearest artifact for dwell tracking
-      context.read<DevOptionsProvider>().setNearbyArtifact(nearest.name, nearest.cId);
+      context.read<DevOptionsProvider>().setNearbyArtifact(
+            nearest.name,
+            nearest.cId,
+            artifactLocationId: nearest.id,
+          );
 
       _promptNearbyArtifact(nearest, nearestDist);
     } else {
@@ -306,12 +321,17 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
       errorMessage = '';
     });
     try {
-      await Future.wait([
+      final futures = await Future.wait([
         _loadRoutes(),
         _loadLocations(),
         _loadOtherLocations(),
         _loadUserLocations(),
+        GeoJsonRouteService.load(),
+        _loadUserInterests(),
       ]);
+      final graphResult = futures[4] as ({RouteGraph graph, GeoBBox bbox});
+      _routeGraph = graphResult.graph;
+
       setState(() => isLoading = false);
     } catch (e) {
       setState(() {
@@ -420,6 +440,17 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     _userLocations = locs;
   }
 
+  Future<void> _loadUserInterests() async {
+    try {
+      final response = await _onboardingService.getOnboardingResponse();
+      if (response != null && response['interests'] != null) {
+        _userInterests = (response['interests'] as List).map((e) => e.toString()).toList();
+      }
+    } catch (e) {
+      debugPrint('Failed to load user interests: $e');
+    }
+  }
+
   void _scheduleInitialMapView(Size viewportSize) {
     if (_hasInitializedMapView ||
         viewportSize.width <= 0 ||
@@ -500,6 +531,12 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                                   painter: _NetworkPainter(
                                       routeSegments: routeSegments),
                                 ),
+                                // Navigation route (if any)
+                                if (_navigationPath.isNotEmpty)
+                                  CustomPaint(
+                                    size: const Size(mapWidth, mapHeight),
+                                    painter: _NavigationPainter(path: _navigationPath),
+                                  ),
                                 // Utility markers (other.geojson)
                                 ..._otherLocations
                                     .map((loc) => _buildUtilityMarker(loc)),
@@ -519,6 +556,14 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                     const DwellTimeOverlay(),
                   ],
                 ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _toggleNavigation,
+        backgroundColor: _isNavigating ? Colors.red.shade700 : _kDarkBrown,
+        foregroundColor: Colors.white,
+        icon: Icon(_isNavigating ? Icons.stop : Icons.directions),
+        label: Text(_isNavigating ? 'Stop Navigation' : 'Start Navigation'),
+      ),
     );
   }
 
@@ -564,6 +609,137 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   }
 
   // -------------------------------------------------------------------------
+  // Routing Logic
+  // -------------------------------------------------------------------------
+
+  int? _getCIdForInterest(String interest) {
+    final lower = interest.toLowerCase();
+    if (lower.contains('coin')) return 1;
+    if (lower.contains('ancient') || lower.contains('artifact')) return 2;
+    if (lower.contains('kandy') || lower.contains('king') || lower.contains('royal')) return 3;
+    if (lower.contains('statue')) return 6;
+    if (lower.contains('culture')) return 7;
+    if (lower.contains('tech')) return 8;
+    if (lower.contains('architect')) return 9;
+    if (lower.contains('traditional') || lower.contains('art')) return 10;
+    
+    for (final loc in _locations) {
+      if (loc.cId != null && loc.name.toLowerCase() == lower) {
+        return loc.cId;
+      }
+    }
+    return null;
+  }
+
+  void _toggleNavigation() {
+    if (_isNavigating) {
+      setState(() {
+        _isNavigating = false;
+        _navigationPath.clear();
+        _navigationStops.clear();
+      });
+    } else {
+      if (_selectedUserLocation == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a start location from the Dev Bar first.')),
+        );
+        return;
+      }
+      if (_userInterests.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No interests found from your profile.')),
+        );
+        return;
+      }
+      _calculateRoute();
+    }
+  }
+
+  void _calculateRoute() {
+    if (_selectedUserLocation == null || _routeGraph == null) return;
+
+    Set<int> selectedCIds = {};
+    for (String interest in _userInterests) {
+      int? cid = _getCIdForInterest(interest);
+      if (cid != null) {
+        selectedCIds.add(cid);
+      }
+    }
+
+    if (selectedCIds.isEmpty) return;
+    if (selectedCIds.length > 3) {
+      selectedCIds = selectedCIds.take(3).toSet();
+    }
+
+    final targetsByCid = <int, List<_MapLocation>>{};
+    for (final cid in selectedCIds) {
+      targetsByCid[cid] = _locations.where((l) => l.cId == cid).toList();
+    }
+
+    _MapLocation current = _selectedUserLocation!;
+    final List<_MapLocation> categoryBest = [];
+    for (final cid in selectedCIds) {
+      final list = targetsByCid[cid]!;
+      if (list.isEmpty) continue;
+
+      _MapLocation? nearest;
+      double minDist = double.infinity;
+      for (final loc in list) {
+        final dist = pow(loc.px - current.px, 2) + pow(loc.py - current.py, 2);
+        if (dist < minDist) {
+          minDist = dist.toDouble();
+          nearest = loc;
+        }
+      }
+      if (nearest != null) categoryBest.add(nearest);
+    }
+
+    final List<_MapLocation> visitOrder = [];
+    while (categoryBest.isNotEmpty) {
+      _MapLocation? nextLoc;
+      double minDist = double.infinity;
+      for (final loc in categoryBest) {
+        final dist = pow(loc.px - current.px, 2) + pow(loc.py - current.py, 2);
+        if (dist < minDist) {
+          minDist = dist.toDouble();
+          nextLoc = loc;
+        }
+      }
+      if (nextLoc != null) {
+        visitOrder.add(nextLoc);
+        categoryBest.remove(nextLoc);
+        current = nextLoc;
+      } else {
+        break;
+      }
+    }
+
+    final List<Offset> mergedPath = [];
+    _MapLocation start = _selectedUserLocation!;
+    for (final end in visitOrder) {
+      final res = _routeGraph!.snapAndPath(
+        fromX: start.px, fromY: start.py,
+        toX: end.px, toY: end.py,
+      );
+      if (res != null && res.hasPath) {
+        final seg = res.path.map((n) => Offset(n.canvasX, n.canvasY)).toList();
+        if (mergedPath.isNotEmpty && seg.isNotEmpty) {
+          mergedPath.addAll(seg.skip(1));
+        } else {
+          mergedPath.addAll(seg);
+        }
+      }
+      start = end;
+    }
+
+    setState(() {
+      _navigationPath = mergedPath;
+      _navigationStops = visitOrder;
+      _isNavigating = true;
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Marker widgets
   // -------------------------------------------------------------------------
 
@@ -572,6 +748,14 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     final color = _categoryColor(loc.name);
     final icon = _categoryIcon(loc.name);
     const double size = 38;
+
+    int stopIndex = _navigationStops.indexOf(loc);
+    bool isStop = stopIndex != -1;
+
+    // Hide non-selected category markers during navigation
+    if (_isNavigating && !isStop) {
+      return const SizedBox.shrink();
+    }
 
     return Positioned(
       left: loc.px - size / 2,
@@ -583,37 +767,62 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             // Circle button
-            Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color.lerp(color, Colors.white, 0.25)!,
-                    color,
-                    Color.lerp(color, _kDarkBrown, 0.4)!,
-                  ],
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Color.lerp(color, Colors.white, 0.25)!,
+                        color,
+                        Color.lerp(color, _kDarkBrown, 0.4)!,
+                      ],
+                    ),
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.55),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                        offset: const Offset(0, 3),
+                      ),
+                      BoxShadow(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        blurRadius: 2,
+                        spreadRadius: 0,
+                        offset: const Offset(-1, -1),
+                      ),
+                    ],
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 20),
                 ),
-                border: Border.all(color: Colors.white, width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.55),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                    offset: const Offset(0, 3),
+                if (isStop)
+                  Positioned(
+                    right: -4,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade700,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black26, blurRadius: 4)
+                        ]
+                      ),
+                      child: Text(
+                        '${stopIndex + 1}',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, height: 1),
+                      ),
+                    ),
                   ),
-                  BoxShadow(
-                    color: Colors.white.withValues(alpha: 0.4),
-                    blurRadius: 2,
-                    spreadRadius: 0,
-                    offset: const Offset(-1, -1),
-                  ),
-                ],
-              ),
-              child: Icon(icon, color: Colors.white, size: 20),
+              ],
             ),
             const SizedBox(height: 3),
             // Name label
@@ -874,4 +1083,31 @@ class _NetworkPainter extends CustomPainter {
   @override
   bool shouldRepaint(_NetworkPainter old) =>
       old.routeSegments != routeSegments;
+}
+
+class _NavigationPainter extends CustomPainter {
+  final List<Offset> path;
+  _NavigationPainter({required this.path});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (path.isEmpty) return;
+
+    final paint = Paint()
+      ..color = Colors.blue.shade700
+      ..strokeWidth = 4.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final pathObj = Path()..moveTo(path[0].dx, path[0].dy);
+    for (final pt in path.skip(1)) {
+      pathObj.lineTo(pt.dx, pt.dy);
+    }
+
+    canvas.drawPath(pathObj, paint);
+  }
+
+  @override
+  bool shouldRepaint(_NavigationPainter old) => old.path != path;
 }
