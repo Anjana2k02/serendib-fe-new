@@ -9,10 +9,10 @@ class EnvConfig {
   // ─────────────────────────────────────────────
 
   // LOCAL
-  static const String backendUrl = 'http://localhost:8080';
+  // static const String backendUrl = 'http://localhost:8080';
 
   // HOSTED
-  // static const String backendUrl = 'https://serendib-be-production.up.railway.app';
+  static const String backendUrl = 'https://serendib-be-production.up.railway.app';
 
   // ─────────────────────────────────────────────
   // Python Server 1
