@@ -3,8 +3,6 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/constants/app_constants.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/storage_service.dart';
-import '../../services/onboarding_api_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -45,12 +43,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (mounted) {
         if (success) {
-          // Registration successful, now submit onboarding responses to backend
-          await _submitOnboardingToBackend();
-
-          if (mounted) {
-            Navigator.of(context).pushReplacementNamed('/home');
-          }
+          Navigator.of(context).pushReplacementNamed('/onboarding');
         } else {
           final error = authProvider.error ?? 'Registration failed. Please try again.';
           ScaffoldMessenger.of(context).showSnackBar(
@@ -64,40 +57,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  /// Submit onboarding responses to backend after successful registration
-  Future<void> _submitOnboardingToBackend() async {
-    try {
-      // Get locally stored onboarding responses
-      final storageService = StorageService();
-      final responses = await storageService.getOnboardingResponses();
 
-      if (responses == null || responses.isEmpty) {
-        // No onboarding responses to submit - this shouldn't happen in normal flow
-        // but user might have skipped onboarding
-        return;
-      }
-
-      // Submit to backend
-      final onboardingService = OnboardingApiService();
-      await onboardingService.submitOnboardingResponse(responses: responses);
-
-      // Successfully submitted - can clear local storage if needed
-      // await storageService.clearOnboardingResponses();
-
-    } catch (e) {
-      // Log error but don't block user from proceeding to home
-      // The onboarding data is still saved locally
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Note: Onboarding preferences saved locally. Will sync later.'),
-            backgroundColor: AppColors.accentGold,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {

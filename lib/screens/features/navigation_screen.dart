@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../providers/map_navigation_provider.dart';
+import '../../providers/activity_provider.dart';
 import '../../widgets/navigation/interactive_map_viewer.dart';
 import '../../widgets/navigation/poi_search_bar.dart';
 import '../../widgets/navigation/route_instructions.dart';
@@ -14,6 +15,23 @@ class NavigationScreen extends StatefulWidget {
 }
 
 class _NavigationScreenState extends State<NavigationScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Start activity recognition when map screen is opened
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final activityProvider = context.read<ActivityProvider>();
+      activityProvider.start();
+    });
+  }
+
+  @override
+  void dispose() {
+    // Stop activity recognition when leaving map screen
+    context.read<ActivityProvider>().stop();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(

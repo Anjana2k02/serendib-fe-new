@@ -5,6 +5,7 @@ import '../../core/constants/app_constants.dart';
 import '../../providers/artifact_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/artifact.dart';
+import '../../widgets/category_artifacts_sheet.dart';
 
 class ArtifactsListScreen extends StatefulWidget {
   const ArtifactsListScreen({super.key});
@@ -151,7 +152,7 @@ class _ArtifactsListScreenState extends State<ArtifactsListScreen> {
                         Icon(
                           Icons.museum_outlined,
                           size: 64,
-                          color: AppColors.textSecondary.withOpacity(0.5),
+                          color: AppColors.textSecondary.withValues(alpha: 0.5),
                         ),
                         const SizedBox(height: AppConstants.spacingMd),
                         Text(
@@ -252,7 +253,7 @@ class ArtifactCard extends StatelessWidget {
                 width: 60,
                 height: 60,
                 decoration: BoxDecoration(
-                  color: AppColors.primaryBrown.withOpacity(0.1),
+                  color: AppColors.primaryBrown.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(AppConstants.radiusSm),
                 ),
                 child: const Icon(
@@ -278,12 +279,35 @@ class ArtifactCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: AppConstants.spacingXs),
-                    Text(
-                      artifact.category,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.primaryBrown,
-                            fontWeight: FontWeight.w500,
+                    GestureDetector(
+                      onTap: () {
+                        final filtered = context
+                            .read<ArtifactProvider>()
+                            .getArtifactsByCategory(artifact.category);
+                        showCategoryArtifactsSheet(
+                            context, artifact.category, filtered);
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            artifact.category,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.primaryBrown,
+                                      fontWeight: FontWeight.w500,
+                                      decoration: TextDecoration.underline,
+                                      decorationColor: AppColors.primaryBrown,
+                                    ),
                           ),
+                          const SizedBox(width: 2),
+                          const Icon(
+                            Icons.expand_less,
+                            size: 14,
+                            color: AppColors.primaryBrown,
+                          ),
+                        ],
+                      ),
                     ),
                     if (artifact.description != null &&
                         artifact.description!.isNotEmpty) ...[
@@ -307,7 +331,7 @@ class ArtifactCard extends StatelessWidget {
                               vertical: AppConstants.spacingXs,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.1),
+                              color: Colors.green.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(AppConstants.radiusSm),
                             ),
                             child: Text(

@@ -5,9 +5,15 @@ import '../../models/onboarding_question.dart';
 import '../../models/country.dart';
 import '../../services/storage_service.dart';
 import '../../services/country_service.dart';
+import '../../services/onboarding_api_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key});
+  final bool isUpdateMode;
+  
+  const OnboardingScreen({
+    super.key,
+    this.isUpdateMode = false,
+  });
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -22,11 +28,89 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // For multi-select questions
   final Map<String, List<String>> _multiSelectResponses = {};
 
-  // For country selection
   bool _showCountryPage = false;
   Country? _selectedCountry;
   List<Country> _countries = [];
   bool _loadingCountries = false;
+  bool _isLoadingPreloads = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isUpdateMode) {
+      _loadExistingPreferences();
+    }
+  }
+
+  Future<void> _loadExistingPreferences() async {
+    setState(() {
+      _isLoadingPreloads = true;
+    });
+
+    try {
+      final apiService = OnboardingApiService();
+      final data = await apiService.getOnboardingResponse();
+      
+      if (data != null && mounted) {
+        setState(() {
+          if (data['visitorType'] != null) {
+            _responses['q1'] = data['visitorType'];
+            if (data['visitorType'] == 'Foreign Visitor') {
+              _showCountryPage = true;
+              if (data['country'] != null) {
+                // Temporary country until loaded
+                _selectedCountry = Country(name: data['country'], code: '', flag: '');
+              }
+            }
+          }
+          
+          if (data['userType'] != null) {
+            _responses['q2'] = data['userType'];
+          }
+          
+          if (data['interests'] != null && data['interests'] is List) {
+            final List<String> interests = List<String>.from(data['interests']);
+            _multiSelectResponses['q3'] = interests;
+            _responses['q3'] = interests;
+          }
+          
+          if (data['timePreference'] != null) {
+            _responses['q4'] = data['timePreference'];
+          }
+          
+          if (data['languagePreference'] != null) {
+            _responses['q5'] = data['languagePreference'];
+          }
+        });
+
+        // Load full country list if needed
+        if (_showCountryPage) {
+          await _loadCountries();
+          // Try to match the selected country with the actual list
+          if (_selectedCountry != null && _countries.isNotEmpty) {
+            try {
+              final actualCountry = _countries.firstWhere(
+                (c) => c.name == _selectedCountry!.name
+              );
+              setState(() {
+                _selectedCountry = actualCountry;
+              });
+            } catch (e) {
+              // Country not found in list, keep the temporary one
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error preloading preferences: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingPreloads = false;
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -148,12 +232,50 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ))
         .toList();
 
-    final storage = StorageService();
-    await storage.saveOnboardingResponses(responses);
-    await storage.setOnboardingCompleted(true);
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: AppColors.primaryBrown),
+      ),
+    );
 
-    if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/register');
+    try {
+      final apiService = OnboardingApiService();
+      await apiService.submitOnboardingResponse(responses: responses);
+      
+      // Also update local storage to keep state in sync
+      final storage = StorageService();
+      await storage.saveOnboardingResponses(responses);
+      await storage.setOnboardingCompleted(true);
+      
+      if (mounted) {
+        Navigator.of(context).pop(); // dismiss loading dialog
+        
+        if (widget.isUpdateMode) {
+          Navigator.of(context).pop(); // go back to profile
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Preferences updated successfully'),
+              backgroundColor: AppColors.success,
+            ),
+          );
+        } else {
+          // Initial onboarding flow
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop(); // dismiss loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save preferences: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
     }
   }
 
@@ -202,31 +324,35 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
             // Questions
             Expanded(
-              child: PageView.builder(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (page) {
-                  setState(() {
-                    _currentPage = page;
-                  });
-                },
-                itemCount: _getTotalPages(),
-                itemBuilder: (context, index) {
-                  // Show country page after Q1 if foreign visitor
-                  if (_showCountryPage && index == 1) {
-                    return _buildCountrySelectionPage();
-                  }
+              child: _isLoadingPreloads 
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.primaryBrown),
+                  )
+                : PageView.builder(
+                    controller: _pageController,
+                    physics: const NeverScrollableScrollPhysics(),
+                    onPageChanged: (page) {
+                      setState(() {
+                        _currentPage = page;
+                      });
+                    },
+                    itemCount: _getTotalPages(),
+                    itemBuilder: (context, index) {
+                      // Show country page after Q1 if foreign visitor
+                      if (_showCountryPage && index == 1) {
+                        return _buildCountrySelectionPage();
+                      }
 
-                  // Adjust index for actual question
-                  final questionIndex = _showCountryPage && index > 1 ? index - 1 : index;
-                  if (questionIndex >= _questions.length) {
-                    return const SizedBox();
-                  }
+                      // Adjust index for actual question
+                      final questionIndex = _showCountryPage && index > 1 ? index - 1 : index;
+                      if (questionIndex >= _questions.length) {
+                        return const SizedBox();
+                      }
 
-                  final question = _questions[questionIndex];
-                  return _buildQuestionPage(question);
-                },
-              ),
+                      final question = _questions[questionIndex];
+                      return _buildQuestionPage(question);
+                    },
+                  ),
             ),
 
             // Bottom navigation

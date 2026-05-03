@@ -9,20 +9,20 @@ class EnvConfig {
   // ─────────────────────────────────────────────
 
   // LOCAL
-  // static const String backendUrl = 'http://localhost:8080';
+  static const String backendUrl = 'http://localhost:8080';
 
   // HOSTED
-  static const String backendUrl = 'https://serendib-be-production.up.railway.app';
+  // static const String backendUrl = 'https://serendib-be-production.up.railway.app';
 
   // ─────────────────────────────────────────────
   // Python Server 1
   // ─────────────────────────────────────────────
 
   // LOCAL
-  static const String pythonServer1Url = 'http://localhost:5000';
+  static const String pythonServer1Url = 'http://localhost:8888';
 
   // HOSTED
-  // static const String pythonServer1Url = 'https://python1.serendib.com';
+  // static const String pythonServer1Url = 'https://museum-model1-production.up.railway.app';
 
   // ─────────────────────────────────────────────
   // Python Server 2

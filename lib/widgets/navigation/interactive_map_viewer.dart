@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import 'poi_marker.dart';
 import 'route_overlay.dart';
 import 'user_position_marker.dart';
+import 'activity_status_widget.dart';
 
 class InteractiveMapViewer extends StatefulWidget {
   const InteractiveMapViewer({super.key});
@@ -72,33 +73,39 @@ class _InteractiveMapViewerState extends State<InteractiveMapViewer>
           });
         }
 
-        return InteractiveViewer(
-          transformationController: _transformationController,
-          minScale: 0.5,
-          maxScale: 5.0,
-          boundaryMargin: const EdgeInsets.all(double.infinity),
-          constrained: false,
-          child: SizedBox(
-            width: 1000,
-            height: 800,
-            child: Stack(
-              children: [
-                RepaintBoundary(
-                  child: SvgPicture.asset(
-                    'assets/maps/museum_floor_plan.svg',
-                    width: 1000,
-                    height: 800,
-                    fit: BoxFit.contain,
-                  ),
+        return Stack(
+          children: [
+            InteractiveViewer(
+              transformationController: _transformationController,
+              minScale: 0.5,
+              maxScale: 5.0,
+              boundaryMargin: const EdgeInsets.all(double.infinity),
+              constrained: false,
+              child: SizedBox(
+                width: 1000,
+                height: 800,
+                child: Stack(
+                  children: [
+                    RepaintBoundary(
+                      child: SvgPicture.asset(
+                        'assets/maps/museum_floor_plan.svg',
+                        width: 1000,
+                        height: 800,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    if (provider.activeRoute != null)
+                      RouteOverlay(route: provider.activeRoute!),
+                    if (provider.userPosition != null)
+                      UserPositionMarker(position: provider.userPosition!),
+                    ...provider.pois.map((poi) => POIMarker(poi: poi)),
+                  ],
                 ),
-                if (provider.activeRoute != null)
-                  RouteOverlay(route: provider.activeRoute!),
-                if (provider.userPosition != null)
-                  UserPositionMarker(position: provider.userPosition!),
-                ...provider.pois.map((poi) => POIMarker(poi: poi)),
-              ],
+              ),
             ),
-          ),
+            // Activity status overlay (fixed position, top-right corner)
+            const ActivityStatusWidget(),
+          ],
         );
       },
     );

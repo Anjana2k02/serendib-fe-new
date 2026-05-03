@@ -2,25 +2,98 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import '../../providers/dev_options_provider.dart';
+import '../../providers/artifact_provider.dart';
+import '../../widgets/category_artifacts_sheet.dart';
+import '../../widgets/navigation/dwell_time_overlay.dart';
+import '../../models/route_graph.dart';
+import '../../services/geojson_route_service.dart';
+import '../../services/onboarding_api_service.dart';
 
 // ---------------------------------------------------------------------------
 // Data models
 // ---------------------------------------------------------------------------
-class _Node {
-  final String key;
-  final double px;
-  final double py;
-  const _Node(this.key, this.px, this.py);
-}
-
 class _MapLocation {
   final int id;
+  final int? cId;
   final String name;
   final double px;
   final double py;
-  const _MapLocation({required this.id, required this.name, required this.px, required this.py});
+  const _MapLocation(
+      {required this.id,
+      this.cId,
+      required this.name,
+      required this.px,
+      required this.py});
 }
 
+// ---------------------------------------------------------------------------
+// Theme colours
+// ---------------------------------------------------------------------------
+const _kDarkBrown = Color(0xFF4E342E);
+const _kMedBrown = Color(0xFF6D4C41);
+const _kLightBrown = Color(0xFF8D6E63);
+const _kCreamBrown = Color(0xFFBCAAA4);
+
+// ---------------------------------------------------------------------------
+// Category → icon / colour helpers
+// ---------------------------------------------------------------------------
+IconData _categoryIcon(String name) {
+  final n = name.toLowerCase();
+  if (n.contains('ancient') || n.contains('artifact'))
+    return Icons.auto_awesome;
+  if (n.contains('coin')) return Icons.monetization_on;
+  if (n.contains('traditional') || n.contains('art')) return Icons.palette;
+  if (n.contains('architect')) return Icons.account_balance;
+  if (n.contains('kandy')) return Icons.history_edu;
+  if (n.contains('king') || n.contains('royal')) return Icons.workspace_premium;
+  if (n.contains('culture')) return Icons.language;
+  if (n.contains('statue') || n.contains('skulture'))
+    return Icons.accessibility_new;
+  if (n.contains('tech')) return Icons.precision_manufacturing;
+  return Icons.place;
+}
+
+Color _categoryColor(String name) {
+  final n = name.toLowerCase();
+  if (n.contains('ancient') || n.contains('artifact'))
+    return const Color(0xFF5D4037);
+  if (n.contains('coin')) return const Color(0xFF6D4C41);
+  if (n.contains('traditional') || n.contains('art'))
+    return const Color(0xFF795548);
+  if (n.contains('architect')) return const Color(0xFF4E342E);
+  if (n.contains('kandy')) return const Color(0xFF5D4037);
+  if (n.contains('king') || n.contains('royal')) return const Color(0xFF4A2C2A);
+  if (n.contains('culture')) return const Color(0xFF6D4C41);
+  if (n.contains('statue')) return const Color(0xFF5D4037);
+  if (n.contains('tech')) return const Color(0xFF795548);
+  return _kMedBrown;
+}
+
+IconData _utilityIcon(String name) {
+  final n = name.toLowerCase();
+  if (n.contains('entran') || n.contains('entrance')) return Icons.login;
+  if (n.contains('exit')) return Icons.logout;
+  if (n.contains('toilet') || n.contains('wc')) return Icons.wc;
+  if (n.contains('ticket')) return Icons.confirmation_number;
+  if (n.contains('rest')) return Icons.chair;
+  return Icons.place;
+}
+
+Color _utilityColor(String name) {
+  final n = name.toLowerCase();
+  if (n.contains('entran') || n.contains('entrance'))
+    return const Color(0xFF2E7D32);
+  if (n.contains('exit')) return const Color(0xFFC62828);
+  if (n.contains('toilet') || n.contains('wc')) return const Color(0xFF1565C0);
+  if (n.contains('ticket')) return const Color(0xFFE65100);
+  return const Color(0xFF546E7A);
+}
+
+// ---------------------------------------------------------------------------
+// Screen
+// ---------------------------------------------------------------------------
 class IndoorMapScreen extends StatefulWidget {
   const IndoorMapScreen({super.key});
 
@@ -29,49 +102,360 @@ class IndoorMapScreen extends StatefulWidget {
 }
 
 class _IndoorMapScreenState extends State<IndoorMapScreen> {
-  List<List<Offset>> routeSegments = [];
-  Map<String, _Node> _nodes = {};
-  Map<String, List<_NodeEdge>> _adjacency = {};
-  List<_MapLocation> _locations = [];
+  static const double _minMapScale = 0.3;
+  static const double _maxMapScale = 5.0;
 
-  _Node? _startNode;
-  _Node? _endNode;
-  List<Offset> _shortestPath = [];
+  final TransformationController _transformationController =
+      TransformationController();
+
+  List<List<Offset>> routeSegments = [];
+  List<_MapLocation> _locations = [];
+  List<_MapLocation> _otherLocations = [];
+  List<_MapLocation> _userLocations = [];
+  _MapLocation? _selectedUserLocation;
+
+  // Routing state
+  RouteGraph? _routeGraph;
+  List<String> _userInterests = [];
+  bool _isNavigating = false;
+  List<Offset> _navigationPath = [];
+  List<_MapLocation> _navigationStops = []; // Points in visit order
+  Set<int> _activeNavigationCategoryIds = {};
+  final OnboardingApiService _onboardingService = OnboardingApiService();
 
   bool isLoading = true;
   String errorMessage = '';
+  bool _hasInitializedMapView = false;
 
-  // QGIS extent
-  static const double minX = -398.762948004;
-  static const double maxX = 1894.154789944;
-  static const double minY = -1423.829054721;
-  static const double maxY = -18.077619119;
+  // Tap detection inside InteractiveViewer
+  Offset? _interactionStartFocalPoint;
+  bool _isInteractionPan = false;
 
-  // PNG dimensions
-  static const double mapWidth  = 1069;
-  static const double mapHeight = 656;
+  // Map dimensions for the indoor map raster asset.
+  static const double mapWidth = 940;
+  static const double mapHeight = 1281;
+
+  // Proximity radius (in map pixels) for nearby artifact detection.
+  static const double _proximityThreshold = 120.0;
 
   @override
   void initState() {
     super.initState();
     _loadAll();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<ArtifactProvider>();
+      if (provider.artifacts.isEmpty && !provider.isLoading) {
+        provider.fetchArtifacts();
+      }
+      context.read<DevOptionsProvider>().addListener(_onDwellTimeUpdate);
+    });
   }
 
-  Offset _geoToPixel(double geoX, double geoY) {
-    final px = (geoX - minX) / (maxX - minX) * mapWidth;
-    final py = (1 - (geoY - minY) / (maxY - minY)) * mapHeight;
-    return Offset(px, py);
+  @override
+  void dispose() {
+    context.read<DevOptionsProvider>().removeListener(_onDwellTimeUpdate);
+    _transformationController.dispose();
+    super.dispose();
   }
 
-  String _nodeKey(double px, double py) => '${px.round()}_${py.round()}';
+  // -------------------------------------------------------------------------
+  // Tap detection via InteractiveViewer interaction callbacks
+  // -------------------------------------------------------------------------
+  void _onInteractionStart(ScaleStartDetails details) {
+    _interactionStartFocalPoint = details.focalPoint;
+    _isInteractionPan = false;
+  }
 
+  void _onInteractionUpdate(ScaleUpdateDetails details) {
+    if (details.focalPointDelta.distance > 6.0 ||
+        (details.scale - 1.0).abs() > 0.02) {
+      _isInteractionPan = true;
+    }
+  }
+
+  void _onInteractionEnd(ScaleEndDetails details) {
+    if (!_isInteractionPan && _interactionStartFocalPoint != null) {
+      _handleMapTap(_interactionStartFocalPoint!);
+    }
+    _interactionStartFocalPoint = null;
+    _isInteractionPan = false;
+  }
+
+  void _handleMapTap(Offset globalFocalPoint) {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+
+    final localPos = box.globalToLocal(globalFocalPoint);
+    final matrix = _transformationController.value;
+    final inverse = Matrix4.inverted(matrix);
+    final mapPos = MatrixUtils.transformPoint(inverse, localPos);
+
+    const double hitRadius = 28.0;
+    for (final loc in _locations) {
+      final dx = loc.px - mapPos.dx;
+      final dy = loc.py - mapPos.dy;
+      if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+        _onCategoryTap(loc);
+        return;
+      }
+    }
+  }
+
+  void _onCategoryTap(_MapLocation loc) {
+    final artifacts =
+        context.read<ArtifactProvider>().getArtifactsForLocation(loc.name);
+    showCategoryArtifactsSheet(context, loc.name, artifacts);
+  }
+
+  void _onUtilityTap(_MapLocation loc) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(_utilityIcon(loc.name), color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text(loc.name),
+          ],
+        ),
+        backgroundColor: _utilityColor(loc.name),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Nearby artifact detection
+  // -------------------------------------------------------------------------
+
+  /// Checks for a nearby artifact when the user is standing.
+  /// [userLoc] and [activity] can be passed directly to avoid setState timing issues;
+  /// if omitted, falls back to [_selectedUserLocation] and [DevOptionsProvider.selectedActivity].
+  void _checkNearbyArtifacts({_MapLocation? userLoc, String? activity}) {
+    final loc = userLoc ?? _selectedUserLocation;
+    if (loc == null) return;
+
+    final act = activity ?? context.read<DevOptionsProvider>().selectedActivity;
+
+    if (act.toLowerCase() != 'standing') {
+      debugPrint('[Proximity] Activity="$act" — skipping check.');
+      return;
+    }
+
+    debugPrint(
+        '[Proximity] STANDING at (${loc.px.toStringAsFixed(1)}, ${loc.py.toStringAsFixed(1)}). Scanning artifacts...');
+
+    _MapLocation? nearest;
+    double nearestDist = double.infinity;
+    for (final artifact in _locations) {
+      final dx = artifact.px - loc.px;
+      final dy = artifact.py - loc.py;
+      final dist = sqrt(dx * dx + dy * dy);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = artifact;
+      }
+    }
+
+    if (nearest != null && nearestDist <= _proximityThreshold) {
+      debugPrint(
+          '[Proximity] ✓ Nearby: "${nearest.name}" | c_id=${nearest.cId} | dist=${nearestDist.toStringAsFixed(1)}px');
+
+      // Update the dev options provider with the nearest artifact for dwell tracking
+      context.read<DevOptionsProvider>().setNearbyArtifact(
+            nearest.name,
+            nearest.cId,
+            artifactLocationId: nearest.id,
+          );
+
+      _promptNearbyArtifact(nearest, nearestDist);
+    } else {
+      debugPrint(
+          '[Proximity] ✗ No artifact within ${_proximityThreshold}px. Closest: "${nearest?.name}" at ${nearestDist.toStringAsFixed(1)}px');
+
+      // Clear the nearby artifact when out of range
+      context.read<DevOptionsProvider>().clearNearbyArtifact();
+    }
+  }
+
+  /// Shows a floating SnackBar with the nearby artifact's name and c_id.
+  void _promptNearbyArtifact(_MapLocation loc, double distance) {
+    if (!mounted) return;
+    final mediaQuery = MediaQuery.of(context);
+    final snackWidth = min(mediaQuery.size.width - 24, 260.0);
+    final topOffset = mediaQuery.padding.top + 12;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.location_on, color: Colors.white, size: 14),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Nearby: ${loc.name}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                      fontSize: 12,
+                      height: 1.1,
+                    ),
+                  ),
+                  Text(
+                    'Category ID: ${loc.cId}  •  ${distance.toStringAsFixed(0)}px away',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 10,
+                      height: 1.1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        width: snackWidth,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        margin: EdgeInsets.only(
+          bottom: mediaQuery.size.height - topOffset - 56,
+        ),
+        backgroundColor: _kMedBrown,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Dwell Time Monitoring for New Interests
+  // -------------------------------------------------------------------------
+
+  Set<int> _promptedCategoryIds = {};
+  bool _isShowingInterestPopup = false;
+
+  void _onDwellTimeUpdate() {
+    if (_isShowingInterestPopup || !mounted) return;
+
+    final devOptions = context.read<DevOptionsProvider>();
+    final dwells = devOptions.allCategoryDwells;
+
+    Set<int> selectedCIds = {};
+    for (String interest in _userInterests) {
+      int? cid = _getCIdForInterest(interest);
+      if (cid != null) {
+        selectedCIds.add(cid);
+      }
+    }
+
+    if (selectedCIds.isEmpty) return;
+
+    for (final unselected in dwells.where((e) => !selectedCIds.contains(e.categoryId))) {
+      if (_promptedCategoryIds.contains(unselected.categoryId)) continue;
+
+      bool isNewInterest = false;
+      for (final selectedId in selectedCIds) {
+        int selectedDwell = 0;
+        try {
+          selectedDwell = dwells.firstWhere((e) => e.categoryId == selectedId).dwellTimeMs;
+        } catch (_) {}
+
+        if (unselected.dwellTimeMs > selectedDwell && unselected.dwellTimeMs >= 5000) {
+          isNewInterest = true;
+          break;
+        }
+      }
+
+      if (isNewInterest) {
+        _promptNewInterest(unselected.categoryId, unselected.artifactName);
+        break; // Only show one popup at a time
+      }
+    }
+  }
+
+  void _promptNewInterest(int cid, String categoryName) {
+    _isShowingInterestPopup = true;
+    _promptedCategoryIds.add(cid);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New Interest Detected'),
+        content: Text('New interest detected: $categoryName. Do you want to re-navigate?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() {
+                _isShowingInterestPopup = false;
+              });
+            },
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() {
+                if (!_userInterests.contains(categoryName)) {
+                  _userInterests.add(categoryName);
+                }
+                _isShowingInterestPopup = false;
+              });
+              
+              if (_isNavigating) {
+                _calculateRoute();
+              } else {
+                _toggleNavigation();
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _kMedBrown,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Data loading
+  // -------------------------------------------------------------------------
   Future<void> _loadAll() async {
-    setState(() { isLoading = true; errorMessage = ''; });
+    setState(() {
+      isLoading = true;
+      errorMessage = '';
+    });
     try {
-      await Future.wait([_loadRoutes(), _loadLocations()]);
+      final futures = await Future.wait([
+        _loadRoutes(),
+        _loadLocations(),
+        _loadOtherLocations(),
+        _loadUserLocations(),
+        GeoJsonRouteService.load(),
+        _loadUserInterests(),
+      ]);
+      final graphResult = futures[4] as ({RouteGraph graph, GeoBBox bbox});
+      _routeGraph = graphResult.graph;
+
       setState(() => isLoading = false);
     } catch (e) {
-      setState(() { errorMessage = 'Failed to load map data: $e'; isLoading = false; });
+      setState(() {
+        errorMessage = 'Failed to load map data: $e';
+        isLoading = false;
+      });
     }
   }
 
@@ -80,8 +464,6 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     final data = jsonDecode(raw) as Map<String, dynamic>;
     final features = data['features'] as List<dynamic>;
     final segments = <List<Offset>>[];
-    final nodes = <String, _Node>{};
-    final adjacency = <String, List<_NodeEdge>>{};
 
     for (final feature in features) {
       final geometry = feature['geometry'] as Map<String, dynamic>;
@@ -91,40 +473,30 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
       if (type == 'LineString') {
         lines = [geometry['coordinates'] as List<dynamic>];
       } else if (type == 'MultiLineString') {
-        lines = (geometry['coordinates'] as List<dynamic>).map((l) => l as List<dynamic>).toList();
+        lines = (geometry['coordinates'] as List<dynamic>)
+            .map((l) => l as List<dynamic>)
+            .toList();
       }
 
       for (final line in lines) {
         final seg = <Offset>[];
         for (final coord in line) {
           final c = coord as List<dynamic>;
-          final p = _geoToPixel((c[0] as num).toDouble(), (c[1] as num).toDouble());
-          seg.add(p);
-          final key = _nodeKey(p.dx, p.dy);
-          nodes.putIfAbsent(key, () => _Node(key, p.dx, p.dy));
+          seg.add(Offset(
+            (c[0] as num).toDouble(),
+            mapHeight - (c[1] as num).toDouble(),
+          ));
         }
         if (seg.isNotEmpty) segments.add(seg);
-
-        for (int i = 0; i < seg.length - 1; i++) {
-          final aKey = _nodeKey(seg[i].dx, seg[i].dy);
-          final bKey = _nodeKey(seg[i + 1].dx, seg[i + 1].dy);
-          if (aKey == bKey) continue;
-          final dx = seg[i].dx - seg[i + 1].dx;
-          final dy = seg[i].dy - seg[i + 1].dy;
-          final w = sqrt(dx * dx + dy * dy);
-          adjacency.putIfAbsent(aKey, () => []).add(_NodeEdge(bKey, w));
-          adjacency.putIfAbsent(bKey, () => []).add(_NodeEdge(aKey, w));
-        }
       }
     }
 
     routeSegments = segments;
-    _nodes = nodes;
-    _adjacency = adjacency;
   }
 
   Future<void> _loadLocations() async {
-    final raw = await rootBundle.loadString('assets/map-routes/location.geojson');
+    final raw =
+        await rootBundle.loadString('assets/map-routes/location.geojson');
     final data = jsonDecode(raw) as Map<String, dynamic>;
     final features = data['features'] as List<dynamic>;
     final locs = <_MapLocation>[];
@@ -132,130 +504,94 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     for (final feature in features) {
       final props = feature['properties'] as Map<String, dynamic>;
       final coords = (feature['geometry']['coordinates'] as List<dynamic>);
-      final p = _geoToPixel((coords[0] as num).toDouble(), (coords[1] as num).toDouble());
       locs.add(_MapLocation(
         id: (props['id'] as num).toInt(),
-        name: props['name'] as String,
-        px: p.dx,
-        py: p.dy,
+        cId: props['c_id'] != null ? (props['c_id'] as num).toInt() : null,
+        name: (props['Category Name'] ?? props['name'] ?? '') as String,
+        px: (coords[0] as num).toDouble(),
+        py: mapHeight - (coords[1] as num).toDouble(),
       ));
     }
 
     _locations = locs;
   }
 
-  _Node? _nearestNode(Offset tapPx) {
-    _Node? best;
-    double bestDist = double.infinity;
-    for (final n in _nodes.values) {
-      final dx = n.px - tapPx.dx;
-      final dy = n.py - tapPx.dy;
-      final d = dx * dx + dy * dy;
-      if (d < bestDist) { bestDist = d; best = n; }
+  Future<void> _loadOtherLocations() async {
+    final raw = await rootBundle.loadString('assets/map-routes/other.geojson');
+    final data = jsonDecode(raw) as Map<String, dynamic>;
+    final features = data['features'] as List<dynamic>;
+    final locs = <_MapLocation>[];
+
+    for (final feature in features) {
+      final props = feature['properties'] as Map<String, dynamic>;
+      final coords = (feature['geometry']['coordinates'] as List<dynamic>);
+      locs.add(_MapLocation(
+        id: (props['id'] as num).toInt(),
+        name: (props['Category Name'] ?? props['name'] ?? '') as String,
+        px: (coords[0] as num).toDouble(),
+        py: mapHeight - (coords[1] as num).toDouble(),
+      ));
     }
-    return best;
+
+    _otherLocations = locs;
   }
 
-  void _selectNode(_Node nearest) {
-    setState(() {
-      if (_startNode == null) {
-        _startNode = nearest;
-        _endNode = null;
-        _shortestPath = [];
-      } else if (_endNode == null) {
-        _endNode = nearest;
-        _shortestPath = _dijkstra(_startNode!.key, nearest.key);
-      } else {
-        _startNode = nearest;
-        _endNode = null;
-        _shortestPath = [];
+  Future<void> _loadUserLocations() async {
+    final raw = await rootBundle.loadString('assets/user/userlocation.geojson');
+    final data = jsonDecode(raw) as Map<String, dynamic>;
+    final features = data['features'] as List<dynamic>;
+    final locs = <_MapLocation>[];
+
+    for (final feature in features) {
+      final props = feature['properties'] as Map<String, dynamic>;
+      final coords = (feature['geometry']['coordinates'] as List<dynamic>);
+      locs.add(_MapLocation(
+        id: (props['id'] as num).toInt(),
+        name: props['name'] as String,
+        px: (coords[0] as num).toDouble(),
+        py: mapHeight - (coords[1] as num).toDouble(),
+      ));
+    }
+
+    _userLocations = locs;
+  }
+
+  Future<void> _loadUserInterests() async {
+    try {
+      final response = await _onboardingService.getOnboardingResponse();
+      if (response != null && response['interests'] != null) {
+        _userInterests =
+            (response['interests'] as List).map((e) => e.toString()).toList();
       }
+    } catch (e) {
+      debugPrint('Failed to load user interests: $e');
+    }
+  }
+
+  void _scheduleInitialMapView(Size viewportSize) {
+    if (_hasInitializedMapView ||
+        viewportSize.width <= 0 ||
+        viewportSize.height <= 0) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _hasInitializedMapView) return;
+
+      final fitScale = min(
+        viewportSize.width / mapWidth,
+        viewportSize.height / mapHeight,
+      );
+      final initialScale = min(1.0, max(_minMapScale, fitScale));
+      final dx = (viewportSize.width - mapWidth * initialScale) / 2;
+      final dy = (viewportSize.height - mapHeight * initialScale) / 2;
+
+      _transformationController.value = Matrix4.identity()
+        ..setTranslationRaw(dx, dy, 0.0)
+        ..scaleByDouble(initialScale, initialScale, 1.0, 1.0);
+
+      _hasInitializedMapView = true;
     });
-  }
-
-  void _onMapTap(TapUpDetails details) {
-    if (_nodes.isEmpty) return;
-    final nearest = _nearestNode(details.localPosition);
-    if (nearest != null) _selectNode(nearest);
-  }
-
-  void _onLocationTap(_MapLocation loc) {
-    final nearest = _nearestNode(Offset(loc.px, loc.py));
-    if (nearest != null) _selectNode(nearest);
-  }
-
-  List<Offset> _dijkstra(String startKey, String endKey) {
-    if (startKey == endKey) {
-      final n = _nodes[startKey];
-      return n != null ? [Offset(n.px, n.py)] : [];
-    }
-
-    final dist = <String, double>{startKey: 0.0};
-    final prev = <String, String>{};
-    final visited = <String>{};
-    final queue = <_DijkstraEntry>[_DijkstraEntry(startKey, 0.0)];
-
-    while (queue.isNotEmpty) {
-      queue.sort((a, b) => a.dist.compareTo(b.dist));
-      final cur = queue.removeAt(0);
-      if (visited.contains(cur.key)) continue;
-      visited.add(cur.key);
-      if (cur.key == endKey) break;
-
-      for (final edge in _adjacency[cur.key] ?? []) {
-        if (visited.contains(edge.toKey)) continue;
-        final newDist = (dist[cur.key] ?? double.infinity) + edge.weight;
-        if (newDist < (dist[edge.toKey] ?? double.infinity)) {
-          dist[edge.toKey] = newDist;
-          prev[edge.toKey] = cur.key;
-          queue.add(_DijkstraEntry(edge.toKey, newDist));
-        }
-      }
-    }
-
-    if (!prev.containsKey(endKey)) return [];
-
-    final path = <Offset>[];
-    String? cur = endKey;
-    while (cur != null) {
-      final n = _nodes[cur];
-      if (n != null) path.insert(0, Offset(n.px, n.py));
-      cur = prev[cur];
-    }
-    return path;
-  }
-
-  void _reset() {
-    setState(() { _startNode = null; _endNode = null; _shortestPath = []; });
-  }
-
-  // -------------------------------------------------------------------------
-  // Icon per location name
-  // -------------------------------------------------------------------------
-  IconData _iconFor(String name) {
-    final n = name.toLowerCase();
-    if (n.contains('entrance')) return Icons.login;
-    if (n.contains('exit')) return Icons.logout;
-    if (n.contains('toilet') || n.contains('wc')) return Icons.wc;
-    if (n.contains('rest')) return Icons.chair;
-    if (n.contains('outdoor')) return Icons.park;
-    if (n.contains('gallery') || n.contains('art')) return Icons.museum;
-    if (n.contains('crown') || n.contains('royal')) return Icons.workspace_premium;
-    if (n.contains('coin')) return Icons.monetization_on;
-    if (n.contains('cloth')) return Icons.checkroom;
-    if (n.contains('statue') || n.contains('skulture')) return Icons.accessibility_new;
-    if (n.contains('mask')) return Icons.theater_comedy;
-    if (n.contains('weapon') || n.contains('sword') || n.contains('wepon')) return Icons.gavel;
-    if (n.contains('pottery')) return Icons.emoji_food_beverage;
-    return Icons.place;
-  }
-
-  Color _colorFor(String name) {
-    final n = name.toLowerCase();
-    if (n.contains('entrance') || n.contains('exit')) return Colors.green.shade700;
-    if (n.contains('toilet') || n.contains('rest')) return Colors.blue.shade600;
-    if (n.contains('outdoor')) return Colors.teal.shade600;
-    return const Color(0xFF6D4C41); // brown for artifacts
   }
 
   // -------------------------------------------------------------------------
@@ -263,177 +599,603 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   // -------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
+    final devOptions = context.watch<DevOptionsProvider>();
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F0EB),
       appBar: AppBar(
         title: const Text('Museum Indoor Map'),
-        actions: [
-          if (_startNode != null)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Clear selection',
-              onPressed: _reset,
-            ),
-        ],
+        bottom: devOptions.developerOptionsEnabled
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(48),
+                child: _buildDevBar(devOptions),
+              )
+            : null,
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: _kMedBrown))
           : errorMessage.isNotEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error, color: Colors.red, size: 50),
-                      const SizedBox(height: 10),
-                      Text(errorMessage, style: const TextStyle(color: Colors.red)),
-                      const SizedBox(height: 10),
-                      ElevatedButton(onPressed: _loadAll, child: const Text('Retry')),
-                    ],
-                  ),
-                )
-              : Column(
+              ? _buildError()
+              : Stack(
                   children: [
-                    _buildStatusBar(),
-                    Expanded(
-                      child: InteractiveViewer(
-                        constrained: false,
-                        minScale: 0.3,
-                        maxScale: 5.0,
-                        child: GestureDetector(
-                          onTapUp: _onMapTap,
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        _scheduleInitialMapView(constraints.biggest);
+
+                        return InteractiveViewer(
+                          transformationController: _transformationController,
+                          constrained: false,
+                          minScale: _minMapScale,
+                          maxScale: _maxMapScale,
+                          onInteractionStart: _onInteractionStart,
+                          onInteractionUpdate: _onInteractionUpdate,
+                          onInteractionEnd: _onInteractionEnd,
                           child: SizedBox(
                             width: mapWidth,
                             height: mapHeight,
                             child: Stack(
                               clipBehavior: Clip.none,
                               children: [
-                                // PNG map
+                                // Base indoor map image
                                 Image.asset(
                                   'assets/maps/indoor_map.png',
                                   width: mapWidth,
                                   height: mapHeight,
                                   fit: BoxFit.fill,
                                 ),
-                                // Dashed route network
+                                // Walking paths
                                 CustomPaint(
                                   size: const Size(mapWidth, mapHeight),
-                                  painter: _NetworkPainter(routeSegments: routeSegments),
+                                  painter: _NetworkPainter(
+                                      routeSegments: routeSegments),
                                 ),
-                                // Shortest path
-                                if (_shortestPath.length >= 2)
+                                // Navigation route (if any)
+                                if (_navigationPath.isNotEmpty)
                                   CustomPaint(
                                     size: const Size(mapWidth, mapHeight),
-                                    painter: _ShortestPathPainter(path: _shortestPath),
+                                    painter: _NavigationPainter(
+                                        path: _navigationPath),
                                   ),
-                                // Location markers
-                                ..._locations.map((loc) => _buildLocationMarker(loc)),
-                                // Start / end pins
-                                if (_startNode != null)
-                                  Positioned(
-                                    left: _startNode!.px - 12,
-                                    top: _startNode!.py - 28,
-                                    child: const Icon(Icons.location_on, color: Colors.green, size: 28),
-                                  ),
-                                if (_endNode != null)
-                                  Positioned(
-                                    left: _endNode!.px - 12,
-                                    top: _endNode!.py - 28,
-                                    child: const Icon(Icons.flag, color: Colors.red, size: 28),
-                                  ),
+                                // Utility markers (other.geojson)
+                                ..._otherLocations
+                                    .map((loc) => _buildUtilityMarker(loc)),
+                                // Category artifact markers (location.geojson)
+                                ..._locations
+                                    .map((loc) => _buildCategoryMarker(loc)),
+                                // Selected user location marker
+                                if (_selectedUserLocation != null)
+                                  _buildUserLocationMarker(
+                                      _selectedUserLocation!),
                               ],
                             ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
+                    // Live dwell time overlay (bottom-right, developer option)
+                    const DwellTimeOverlay(),
                   ],
                 ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _toggleNavigation,
+        backgroundColor: _isNavigating ? Colors.red.shade700 : _kDarkBrown,
+        foregroundColor: Colors.white,
+        icon: Icon(_isNavigating ? Icons.stop : Icons.directions),
+        label: Text(_isNavigating ? 'Stop Navigation' : 'Start Navigation'),
+      ),
     );
   }
 
-  Widget _buildLocationMarker(_MapLocation loc) {
-    final color = _colorFor(loc.name);
-    final icon  = _iconFor(loc.name);
-
-    return Positioned(
-      left: loc.px - 14,
-      top:  loc.py - 14,
-      child: GestureDetector(
-        onTap: () => _onLocationTap(loc),
-        child: Opacity(
-          opacity: 0.7,
-          child: Column(
-          mainAxisSize: MainAxisSize.min,
+  Widget _buildError() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 28,
-              height: 28,
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: color,
+                color: const Color(0xFFFBE9E7),
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 3,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
+                border: Border.all(color: Colors.red.shade200),
               ),
-              child: Icon(icon, color: Colors.white, size: 14),
+              child: Icon(Icons.error_outline,
+                  color: Colors.red.shade700, size: 48),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.85),
-                borderRadius: BorderRadius.circular(3),
-              ),
-              child: Text(
-                loc.name,
-                style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.w600),
-                textAlign: TextAlign.center,
+            const SizedBox(height: 16),
+            Text(
+              errorMessage,
+              style: const TextStyle(color: Colors.red),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _loadAll,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kMedBrown,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ],
-        ),
         ),
       ),
     );
   }
 
-  Widget _buildStatusBar() {
-    final String msg;
-    if (_startNode == null) {
-      msg = 'Tap a location or the map to set start';
-    } else if (_endNode == null) {
-      msg = 'Now tap a location or map to set destination';
-    } else if (_shortestPath.isEmpty) {
-      msg = 'No path found — tap to reset';
+  // -------------------------------------------------------------------------
+  // Routing Logic
+  // -------------------------------------------------------------------------
+
+  int? _getCIdForInterest(String interest) {
+    final lower = interest.toLowerCase();
+    if (lower.contains('coin')) return 1;
+    if (lower.contains('ancient') || lower.contains('artifact')) return 2;
+    if (lower.contains('kandy') ||
+        lower.contains('king') ||
+        lower.contains('royal')) return 3;
+    if (lower.contains('statue')) return 6;
+    if (lower.contains('culture')) return 7;
+    if (lower.contains('tech')) return 8;
+    if (lower.contains('architect')) return 9;
+    if (lower.contains('traditional') || lower.contains('art')) return 10;
+
+    for (final loc in _locations) {
+      if (loc.cId != null && loc.name.toLowerCase() == lower) {
+        return loc.cId;
+      }
+    }
+    return null;
+  }
+
+  void _toggleNavigation() {
+    if (_isNavigating) {
+      setState(() {
+        _isNavigating = false;
+        _navigationPath.clear();
+        _navigationStops.clear();
+        _activeNavigationCategoryIds.clear();
+      });
     } else {
-      msg = 'Route found  •  tap map to reset';
+      if (_selectedUserLocation == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Please select a start location from the Dev Bar first.')),
+        );
+        return;
+      }
+      if (_userInterests.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No interests found from your profile.')),
+        );
+        return;
+      }
+      _calculateRoute();
+    }
+  }
+
+  void _calculateRoute() {
+    if (_selectedUserLocation == null || _routeGraph == null) return;
+    final snappedStart = _nearestRouteAnchor(_selectedUserLocation!);
+
+    Set<int> selectedCIds = {};
+    for (String interest in _userInterests) {
+      int? cid = _getCIdForInterest(interest);
+      if (cid != null) {
+        selectedCIds.add(cid);
+      }
     }
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: Colors.blue.shade50,
-      child: Text(msg, style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
+    if (selectedCIds.isEmpty) return;
+    final remainingTargets = _locations
+        .where((loc) => loc.cId != null && selectedCIds.contains(loc.cId))
+        .toList();
+    if (remainingTargets.isEmpty) {
+      setState(() {
+        _navigationPath = [];
+        _navigationStops = [];
+        _isNavigating = false;
+        _activeNavigationCategoryIds = {};
+      });
+      return;
+    }
+
+    final List<_MapLocation> visitOrder = [];
+    _MapLocation current = snappedStart;
+    while (remainingTargets.isNotEmpty) {
+      _MapLocation? nextLoc;
+      double minDist = double.infinity;
+      for (final loc in remainingTargets) {
+        final dist = pow(loc.px - current.px, 2) + pow(loc.py - current.py, 2);
+        if (dist < minDist) {
+          minDist = dist.toDouble();
+          nextLoc = loc;
+        }
+      }
+      if (nextLoc != null) {
+        visitOrder.add(nextLoc);
+        remainingTargets.remove(nextLoc);
+        current = nextLoc;
+      } else {
+        break;
+      }
+    }
+
+    final List<Offset> mergedPath = [];
+    _MapLocation start = snappedStart;
+    for (final end in visitOrder) {
+      final res = _routeGraph!.snapAndPath(
+        fromX: start.px,
+        fromY: start.py,
+        toX: end.px,
+        toY: end.py,
+      );
+      if (res != null && res.hasPath) {
+        if (mergedPath.isEmpty) {
+          mergedPath.add(
+              Offset(_selectedUserLocation!.px, _selectedUserLocation!.py));
+          if ((res.fromSnap.canvasX - _selectedUserLocation!.px).abs() > 0.5 ||
+              (res.fromSnap.canvasY - _selectedUserLocation!.py).abs() > 0.5) {
+            mergedPath.add(Offset(res.fromSnap.canvasX, res.fromSnap.canvasY));
+          }
+        }
+        final seg = res.path.map((n) => Offset(n.canvasX, n.canvasY)).toList();
+        if (mergedPath.isNotEmpty && seg.isNotEmpty) {
+          mergedPath.addAll(seg.skip(1));
+        } else {
+          mergedPath.addAll(seg);
+        }
+      }
+      start = end;
+    }
+
+    setState(() {
+      _navigationPath = mergedPath;
+      _navigationStops = visitOrder;
+      _activeNavigationCategoryIds = selectedCIds;
+      _isNavigating = true;
+    });
+  }
+
+  _MapLocation _nearestRouteAnchor(_MapLocation source) {
+    final nearestNode = _routeGraph?.nearestNode(source.px, source.py);
+    if (nearestNode == null) return source;
+
+    return _MapLocation(
+      id: source.id,
+      cId: source.cId,
+      name: source.name,
+      px: nearestNode.canvasX,
+      py: nearestNode.canvasY,
     );
   }
-}
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-class _NodeEdge {
-  final String toKey;
-  final double weight;
-  _NodeEdge(this.toKey, this.weight);
-}
+  void _updateSelectedUserLocation(_MapLocation newLoc) {
+    setState(() {
+      _selectedUserLocation = newLoc;
+    });
 
-class _DijkstraEntry {
-  final String key;
-  final double dist;
-  _DijkstraEntry(this.key, this.dist);
+    _checkNearbyArtifacts(userLoc: newLoc);
+
+    if (_isNavigating) {
+      _calculateRoute();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Marker widgets
+  // -------------------------------------------------------------------------
+
+  /// Artifact category marker — tappable, brown gradient, opens artifact sheet.
+  Widget _buildCategoryMarker(_MapLocation loc) {
+    final color = _categoryColor(loc.name);
+    final icon = _categoryIcon(loc.name);
+    const double size = 38;
+
+    final stopIndex = _navigationStops.indexOf(loc);
+    final isStop = stopIndex != -1;
+    final isSelectedCategory = _isNavigating &&
+        loc.cId != null &&
+        _activeNavigationCategoryIds.contains(loc.cId);
+    final isMuted = _isNavigating && !isSelectedCategory;
+    final markerColor =
+        isMuted ? Color.lerp(color, Colors.grey.shade500, 0.6)! : color;
+    final labelColor =
+        isMuted ? Color.lerp(color, Colors.grey.shade600, 0.7)! : color;
+    final iconColor =
+        isMuted ? Colors.white.withValues(alpha: 0.82) : Colors.white;
+    final borderColor =
+        isMuted ? Colors.white.withValues(alpha: 0.78) : Colors.white;
+    final shadowAlpha = isMuted ? 0.22 : 0.55;
+    final labelAlpha = isMuted ? 0.74 : 0.92;
+
+    return Positioned(
+      left: loc.px - size / 2,
+      top: loc.py - size / 2 - 10,
+      child: GestureDetector(
+        onTap: () => _onCategoryTap(loc),
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Circle button
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Color.lerp(
+                            markerColor, Colors.white, isMuted ? 0.12 : 0.25)!,
+                        markerColor,
+                        Color.lerp(
+                            markerColor, _kDarkBrown, isMuted ? 0.2 : 0.4)!,
+                      ],
+                    ),
+                    border: Border.all(color: borderColor, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: markerColor.withValues(alpha: shadowAlpha),
+                        blurRadius: isMuted ? 4 : 8,
+                        spreadRadius: isMuted ? 0 : 1,
+                        offset: const Offset(0, 3),
+                      ),
+                      BoxShadow(
+                        color: Colors.white
+                            .withValues(alpha: isMuted ? 0.18 : 0.4),
+                        blurRadius: isMuted ? 1 : 2,
+                        spreadRadius: 0,
+                        offset: const Offset(-1, -1),
+                      ),
+                    ],
+                  ),
+                  child: Icon(icon, color: iconColor, size: 20),
+                ),
+                if (isStop)
+                  Positioned(
+                    right: -4,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                          color: Colors.red.shade700,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                          boxShadow: const [
+                            BoxShadow(color: Colors.black26, blurRadius: 4)
+                          ]),
+                      child: Text(
+                        '${stopIndex + 1}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            height: 1),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            // Name label
+            Container(
+              constraints: const BoxConstraints(maxWidth: 80),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: labelColor.withValues(alpha: labelAlpha),
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: [
+                  BoxShadow(
+                    color:
+                        Colors.black.withValues(alpha: isMuted ? 0.14 : 0.25),
+                    blurRadius: isMuted ? 2 : 3,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Text(
+                loc.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 7,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                  height: 1.2,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Utility marker (Entrance / Exit / Toilet / Ticket Counter) — tappable.
+  Widget _buildUtilityMarker(_MapLocation loc) {
+    final color = _utilityColor(loc.name);
+    final icon = _utilityIcon(loc.name);
+    const double size = 32;
+
+    return Positioned(
+      left: loc.px - size / 2,
+      top: loc.py - size / 2 - 8,
+      child: GestureDetector(
+        onTap: () => _onUtilityTap(loc),
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Circle button
+            Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.5),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: Colors.white, size: 16),
+            ),
+            const SizedBox(height: 2),
+            // Name label
+            Container(
+              constraints: const BoxConstraints(maxWidth: 64),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.88),
+                borderRadius: BorderRadius.circular(5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.2),
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Text(
+                loc.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 6.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.2,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserLocationMarker(_MapLocation loc) {
+    return Positioned(
+      left: loc.px - 18,
+      top: loc.py - 18,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.blue.shade700,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.blue.withValues(alpha: 0.4),
+                  blurRadius: 8,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: const Icon(Icons.person_pin, color: Colors.white, size: 20),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade700.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              loc.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 8,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Dev bar
+  // -------------------------------------------------------------------------
+  Widget _buildDevBar(DevOptionsProvider devOptions) {
+    const labelStyle = TextStyle(color: Colors.white70, fontSize: 11);
+    const dropdownStyle = TextStyle(color: Colors.white, fontSize: 12);
+
+    return Container(
+      color: Colors.black54,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Row(
+        children: [
+          const Text('Loc:', style: labelStyle),
+          const SizedBox(width: 4),
+          DropdownButton<String>(
+            value: _selectedUserLocation?.name,
+            hint: Text('Select...', style: dropdownStyle),
+            isDense: true,
+            dropdownColor: Colors.brown.shade800,
+            style: dropdownStyle,
+            underline: const SizedBox.shrink(),
+            iconEnabledColor: Colors.white70,
+            items: _userLocations
+                .map((l) => DropdownMenuItem(
+                    value: l.name, child: Text(l.name, style: dropdownStyle)))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) {
+                final newLoc = _userLocations.firstWhere((l) => l.name == v);
+                _updateSelectedUserLocation(newLoc);
+              }
+            },
+          ),
+          const SizedBox(width: 16),
+          const Text('Activity:', style: labelStyle),
+          const SizedBox(width: 4),
+          DropdownButton<String>(
+            value: devOptions.selectedActivity,
+            isDense: true,
+            dropdownColor: Colors.brown.shade800,
+            style: dropdownStyle,
+            underline: const SizedBox.shrink(),
+            iconEnabledColor: Colors.white70,
+            items: DevOptionsProvider.activities
+                .map((a) => DropdownMenuItem(
+                    value: a, child: Text(a, style: dropdownStyle)))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) {
+                context.read<DevOptionsProvider>().setSelectedActivity(v);
+                _checkNearbyArtifacts(activity: v);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -446,27 +1208,33 @@ class _NetworkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (routeSegments.isEmpty) return;
-    final paint = Paint()
-      ..color = Colors.grey.withValues(alpha: 0.55)
-      ..strokeWidth = 1.8
+    final pathPaint = Paint()
+      ..color = _kLightBrown.withValues(alpha: 0.7)
+      ..strokeWidth = 2.6
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
 
     for (final seg in routeSegments) {
       if (seg.isEmpty) continue;
       final path = Path()..moveTo(seg[0].dx, seg[0].dy);
-      for (final pt in seg.skip(1)) { path.lineTo(pt.dx, pt.dy); }
-      _drawDashed(canvas, path, paint);
+      for (final pt in seg.skip(1)) {
+        path.lineTo(pt.dx, pt.dy);
+      }
+      _drawDashedPath(canvas, path, pathPaint);
     }
   }
 
-  void _drawDashed(Canvas canvas, Path path, Paint paint) {
-    const dash = 7.0, gap = 5.0;
-    for (final m in path.computeMetrics()) {
-      double d = 0;
-      while (d < m.length) {
-        canvas.drawPath(m.extractPath(d, (d + dash).clamp(0.0, m.length)), paint);
-        d += dash + gap;
+  void _drawDashedPath(Canvas canvas, Path path, Paint paint) {
+    const dashLength = 10.0;
+    const gapLength = 7.0;
+
+    for (final metric in path.computeMetrics()) {
+      double distance = 0;
+      while (distance < metric.length) {
+        final end = (distance + dashLength).clamp(0.0, metric.length);
+        canvas.drawPath(metric.extractPath(distance, end), paint);
+        distance += dashLength + gapLength;
       }
     }
   }
@@ -475,25 +1243,29 @@ class _NetworkPainter extends CustomPainter {
   bool shouldRepaint(_NetworkPainter old) => old.routeSegments != routeSegments;
 }
 
-class _ShortestPathPainter extends CustomPainter {
+class _NavigationPainter extends CustomPainter {
   final List<Offset> path;
-  _ShortestPathPainter({required this.path});
+  _NavigationPainter({required this.path});
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (path.length < 2) return;
+    if (path.isEmpty) return;
+
     final paint = Paint()
-      ..color = Colors.blue
-      ..strokeWidth = 3.0
+      ..color = Colors.blue.shade700
+      ..strokeWidth = 4.5
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
-    final p = Path()..moveTo(path[0].dx, path[0].dy);
-    for (final pt in path.skip(1)) { p.lineTo(pt.dx, pt.dy); }
-    canvas.drawPath(p, paint);
+    final pathObj = Path()..moveTo(path[0].dx, path[0].dy);
+    for (final pt in path.skip(1)) {
+      pathObj.lineTo(pt.dx, pt.dy);
+    }
+
+    canvas.drawPath(pathObj, paint);
   }
 
   @override
-  bool shouldRepaint(_ShortestPathPainter old) => old.path != path;
+  bool shouldRepaint(_NavigationPainter old) => old.path != path;
 }

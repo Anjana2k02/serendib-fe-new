@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/constants/app_constants.dart';
+import '../../providers/dev_options_provider.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -16,6 +18,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final devOptions = context.watch<DevOptionsProvider>();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
@@ -64,6 +67,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Dark mode coming soon')),
                 );
+              },
+              activeThumbColor: AppColors.primaryBrown,
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.developer_mode_outlined,
+            title: 'Developer Options',
+            subtitle: devOptions.developerOptionsEnabled ? 'Turn off' : 'Turn on',
+            trailing: Switch(
+              value: devOptions.developerOptionsEnabled,
+              onChanged: (value) {
+                context.read<DevOptionsProvider>().setDeveloperOptions(value);
               },
               activeThumbColor: AppColors.primaryBrown,
             ),

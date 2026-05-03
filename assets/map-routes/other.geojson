@@ -1,0 +1,11 @@
+{
+"type": "FeatureOthers",
+"name": "other",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "Category Name": "Entrence", "c_id": 50, "id": 30 }, "geometry": { "type": "Point", "coordinates": [ 408.269721470583818, 187.509169034801744 ] } },
+{ "type": "Feature", "properties": { "Category Name": "Exit", "c_id": 50, "id": 31 }, "geometry": { "type": "Point", "coordinates": [ 285.705658350000476, 759.474796930857565 ] } },
+{ "type": "Feature", "properties": { "Category Name": "Toilet", "c_id": 50, "id": 32 }, "geometry": { "type": "Point", "coordinates": [ 498.7336728214907, 776.983948805226646 ] } },
+{ "type": "Feature", "properties": { "Category Name": "Ticket Counter", "c_id": 50, "id": 33 }, "geometry": { "type": "Point", "coordinates": [ 752.616374999842037, 205.018320909170598 ] } }
+]
+}

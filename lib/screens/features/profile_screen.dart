@@ -4,6 +4,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/constants/app_constants.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/user_service.dart';
+import '../onboarding/onboarding_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -287,6 +288,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
               icon: Icons.person_outline,
               title: 'Edit Profile',
               onTap: _showEditProfileDialog,
+            ),
+            _ProfileOption(
+              icon: Icons.tune_outlined,
+              title: 'Preferences',
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const OnboardingScreen(isUpdateMode: true),
+                  ),
+                );
+              },
             ),
             _ProfileOption(
               icon: Icons.security,

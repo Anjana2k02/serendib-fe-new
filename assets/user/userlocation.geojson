@@ -1,0 +1,16 @@
+{
+"type": "FeatureCollection",
+"name": "userlocation",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "name": "Start", "id": 1 }, "geometry": { "type": "Point", "coordinates": [ 502.984962299551569, 222.665093989975048 ] } },
+{ "type": "Feature", "properties": { "name": "Entrance Hall", "id": 2 }, "geometry": { "type": "Point", "coordinates": [ 508.645973486293826, 521.283434090629044 ] } },
+{ "type": "Feature", "properties": { "name": "Middle Hall", "id": 3 }, "geometry": { "type": "Point", "coordinates": [ 807.264313586947765, 669.884977742613273 ] } },
+{ "type": "Feature", "properties": { "name": "pottery hall", "id": 4 }, "geometry": { "type": "Point", "coordinates": [ 723.152103424198344, 470.155920471759941 ] } },
+{ "type": "Feature", "properties": { "name": "Middle hall Left", "id": 5 }, "geometry": { "type": "Point", "coordinates": [ 600.885182050436356, 819.069282957372025 ] } },
+{ "type": "Feature", "properties": { "name": "New Hall Way", "id": 6 }, "geometry": { "type": "Point", "coordinates": [ 872.767317447867413, 1063.066071134553795 ] } },
+{ "type": "Feature", "properties": { "name": "Art Gallery Hall", "id": 7 }, "geometry": { "type": "Point", "coordinates": [ 444.030103936533806, 890.525485209260978 ] } },
+{ "type": "Feature", "properties": { "name": "Top Left Hall", "id": 8 }, "geometry": { "type": "Point", "coordinates": [ 177.697509132660173, 1068.418653418041004 ] } },
+{ "type": "Feature", "properties": { "name": "exit", "id": 10 }, "geometry": { "type": "Point", "coordinates": [ 257.754042921049006, 768.206651711582936 ] } }
+]
+}

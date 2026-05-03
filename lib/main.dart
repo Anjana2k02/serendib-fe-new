@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/artifact_provider.dart';
+import 'providers/dev_options_provider.dart';
 import 'services/storage_service.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/auth/welcome_screen.dart';
@@ -48,6 +49,7 @@ class SerendibApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => ArtifactProvider()),
+        ChangeNotifierProvider(create: (_) => DevOptionsProvider()),
       ],
       child: MaterialApp(
         title: 'Serendib',

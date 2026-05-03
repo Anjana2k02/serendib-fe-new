@@ -185,6 +185,33 @@ class ArtifactProvider with ChangeNotifier {
     }
   }
 
+  /// Returns up to 10 artifacts matching the given category (client-side filter).
+  List<Artifact> getArtifactsByCategory(String category) {
+    return _artifacts
+        .where((a) => a.category.toLowerCase() == category.toLowerCase())
+        .take(10)
+        .toList();
+  }
+
+  /// Returns up to 10 artifacts related to a map location name.
+  /// Splits the location name into keywords and matches against artifact
+  /// category or name (case-insensitive contains).
+  List<Artifact> getArtifactsForLocation(String locationName) {
+    final keywords = locationName
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.length > 2)
+        .toList();
+
+    if (keywords.isEmpty) return [];
+
+    return _artifacts.where((a) {
+      final cat = a.category.toLowerCase();
+      final name = a.name.toLowerCase();
+      return keywords.any((k) => cat.contains(k) || name.contains(k));
+    }).take(10).toList();
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();
