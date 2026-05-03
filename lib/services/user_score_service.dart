@@ -7,20 +7,21 @@ class UserScoreService {
 
   /// Posts incremental dwell time for an artifact to the backend.
   ///
-  /// [artifactId]     - The nearest artifact's location ID (maps to artifact in backend)
+  /// [categoryId]     - The nearest artifact's category ID
   /// [durationMs]     - Incremental milliseconds to add since last POST
   /// [activity]       - Must be "standing" for the backend to accept it
   ///
   /// Returns the updated UserScore response map, or throws on error.
   Future<Map<String, dynamic>> trackDwellTime({
-    required int artifactId,
+    required int categoryId,
     required int durationMs,
     String activity = 'standing',
   }) async {
     final body = {
-      'artifactId': artifactId,
+      'categoryId': categoryId,
       'activity': activity,
       'durationMs': durationMs,
+
     };
 
     final response = await _apiService.post(

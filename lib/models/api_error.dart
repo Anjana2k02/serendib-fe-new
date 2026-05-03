@@ -28,4 +28,9 @@ class ApiError implements Exception {
     }
     return message;
   }
+
+  @override
+  String toString() {
+    return 'ApiError(status: $status, message: $message, path: $path, errors: $errors)';
+  }
 }
