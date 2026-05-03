@@ -127,6 +127,8 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   String errorMessage = '';
   bool _hasInitializedMapView = false;
 
+  DevOptionsProvider? _devOptionsProvider;
+
   // Tap detection inside InteractiveViewer
   Offset? _interactionStartFocalPoint;
   bool _isInteractionPan = false;
@@ -143,17 +145,19 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
     super.initState();
     _loadAll();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final provider = context.read<ArtifactProvider>();
       if (provider.artifacts.isEmpty && !provider.isLoading) {
         provider.fetchArtifacts();
       }
-      context.read<DevOptionsProvider>().addListener(_onDwellTimeUpdate);
+      _devOptionsProvider = context.read<DevOptionsProvider>();
+      _devOptionsProvider!.addListener(_onDwellTimeUpdate);
     });
   }
 
   @override
   void dispose() {
-    context.read<DevOptionsProvider>().removeListener(_onDwellTimeUpdate);
+    _devOptionsProvider?.removeListener(_onDwellTimeUpdate);
     _transformationController.dispose();
     super.dispose();
   }
@@ -588,7 +592,7 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
 
       _transformationController.value = Matrix4.identity()
         ..setTranslationRaw(dx, dy, 0.0)
-        ..scaleByDouble(initialScale, initialScale, 1.0, 1.0);
+        ..scale(initialScale, initialScale, 1.0);
 
       _hasInitializedMapView = true;
     });

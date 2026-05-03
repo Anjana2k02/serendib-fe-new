@@ -45,7 +45,7 @@ class _InteractiveMapViewerState extends State<InteractiveMapViewer>
 
     final targetMatrix = Matrix4.identity()
       ..setTranslationRaw(targetX, targetY, 0.0)
-      ..scaleByDouble(scale, scale, 1.0, 1.0);
+      ..scale(scale, scale, 1.0);
 
     _animation = Matrix4Tween(
       begin: _transformationController.value,

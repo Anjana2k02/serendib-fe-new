@@ -37,7 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _notificationsEnabled = value;
                 });
               },
-              activeThumbColor: AppColors.primaryBrown,
+              activeColor: AppColors.primaryBrown,
             ),
           ),
           _SettingsTile(
@@ -51,7 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _locationEnabled = value;
                 });
               },
-              activeThumbColor: AppColors.primaryBrown,
+              activeColor: AppColors.primaryBrown,
             ),
           ),
           _SettingsTile(
@@ -68,7 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SnackBar(content: Text('Dark mode coming soon')),
                 );
               },
-              activeThumbColor: AppColors.primaryBrown,
+              activeColor: AppColors.primaryBrown,
             ),
           ),
           _SettingsTile(
@@ -80,7 +80,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) {
                 context.read<DevOptionsProvider>().setDeveloperOptions(value);
               },
-              activeThumbColor: AppColors.primaryBrown,
+              activeColor: AppColors.primaryBrown,
             ),
           ),
 
