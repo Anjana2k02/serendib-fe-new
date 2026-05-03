@@ -139,6 +139,13 @@ class DevOptionsProvider extends ChangeNotifier {
     final previousCategoryId = _nearbyCategoryId;
     final categoryChanged = categoryId != previousCategoryId;
 
+    // Stop timers BEFORE updating _nearbyCategoryId so the freeze in
+    // _stopUiTimer() lands on the previous category, not the new one.
+    if (_selectedActivity.toLowerCase() == 'standing' && categoryChanged) {
+      _syncToBackend();
+      _stopTimers();
+    }
+
     _nearbyArtifactName = artifactName;
     _nearbyCategoryId = categoryId;
     _nearbyArtifactId = artifactLocationId;
@@ -156,9 +163,6 @@ class DevOptionsProvider extends ChangeNotifier {
 
     if (_selectedActivity.toLowerCase() == 'standing') {
       if (categoryChanged) {
-        // Flush current accumulated delta to backend before switching categories
-        _syncToBackend();
-        _stopTimers();
         _lastSyncedMs = _categoryDwell[categoryId]?.dwellTimeMs ?? 0;
       }
       _startTimers();
@@ -260,7 +264,7 @@ class DevOptionsProvider extends ChangeNotifier {
 
   /// Calculates the incremental delta since last sync and POSTs to backend.
   void _syncToBackend() {
-    if (_nearbyCategoryId == null || _nearbyArtifactId == null) return;
+    if (_nearbyCategoryId == null) return;
 
     final entry = _categoryDwell[_nearbyCategoryId!];
     if (entry == null) return;
@@ -272,18 +276,18 @@ class DevOptionsProvider extends ChangeNotifier {
 
     _lastSyncedMs = currentMs;
 
-    final artifactId = _nearbyArtifactId!;
+    final categoryId = _nearbyCategoryId!;
     final delta = deltaMs;
 
     // Fire-and-forget POST — errors are logged but don't break the UI
     _userScoreService
         .trackDwellTime(
-      artifactId: artifactId,
+      categoryId: categoryId,
       durationMs: delta,
     )
         .then((_) {
       debugPrint(
-          '[DwellSync] ✓ Synced ${delta}ms for category $_nearbyCategoryId (artifact $artifactId)');
+          '[DwellSync] ✓ Synced ${delta}ms for category $_nearbyCategoryId');
     }).catchError((e) {
       debugPrint('[DwellSync] ✗ POST failed: $e');
       // Revert the sync pointer so we retry on next tick

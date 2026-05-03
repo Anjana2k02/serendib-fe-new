@@ -147,11 +147,13 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
       if (provider.artifacts.isEmpty && !provider.isLoading) {
         provider.fetchArtifacts();
       }
+      context.read<DevOptionsProvider>().addListener(_onDwellTimeUpdate);
     });
   }
 
   @override
   void dispose() {
+    context.read<DevOptionsProvider>().removeListener(_onDwellTimeUpdate);
     _transformationController.dispose();
     super.dispose();
   }
@@ -280,13 +282,17 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   /// Shows a floating SnackBar with the nearby artifact's name and c_id.
   void _promptNearbyArtifact(_MapLocation loc, double distance) {
     if (!mounted) return;
+    final mediaQuery = MediaQuery.of(context);
+    final snackWidth = min(mediaQuery.size.width - 24, 260.0);
+    final topOffset = mediaQuery.padding.top + 12;
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.location_on, color: Colors.white, size: 18),
-            const SizedBox(width: 8),
+            const Icon(Icons.location_on, color: Colors.white, size: 14),
+            const SizedBox(width: 6),
             Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -294,22 +300,132 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                 children: [
                   Text(
                     'Nearby: ${loc.name}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontWeight: FontWeight.bold, color: Colors.white),
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                      fontSize: 12,
+                      height: 1.1,
+                    ),
                   ),
                   Text(
                     'Category ID: ${loc.cId}  •  ${distance.toStringAsFixed(0)}px away',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 10,
+                      height: 1.1,
+                    ),
                   ),
                 ],
               ),
             ),
           ],
         ),
+        width: snackWidth,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        margin: EdgeInsets.only(
+          bottom: mediaQuery.size.height - topOffset - 56,
+        ),
         backgroundColor: _kMedBrown,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Dwell Time Monitoring for New Interests
+  // -------------------------------------------------------------------------
+
+  Set<int> _promptedCategoryIds = {};
+  bool _isShowingInterestPopup = false;
+
+  void _onDwellTimeUpdate() {
+    if (_isShowingInterestPopup || !mounted) return;
+
+    final devOptions = context.read<DevOptionsProvider>();
+    final dwells = devOptions.allCategoryDwells;
+
+    Set<int> selectedCIds = {};
+    for (String interest in _userInterests) {
+      int? cid = _getCIdForInterest(interest);
+      if (cid != null) {
+        selectedCIds.add(cid);
+      }
+    }
+
+    if (selectedCIds.isEmpty) return;
+
+    for (final unselected in dwells.where((e) => !selectedCIds.contains(e.categoryId))) {
+      if (_promptedCategoryIds.contains(unselected.categoryId)) continue;
+
+      bool isNewInterest = false;
+      for (final selectedId in selectedCIds) {
+        int selectedDwell = 0;
+        try {
+          selectedDwell = dwells.firstWhere((e) => e.categoryId == selectedId).dwellTimeMs;
+        } catch (_) {}
+
+        if (unselected.dwellTimeMs > selectedDwell && unselected.dwellTimeMs >= 5000) {
+          isNewInterest = true;
+          break;
+        }
+      }
+
+      if (isNewInterest) {
+        _promptNewInterest(unselected.categoryId, unselected.artifactName);
+        break; // Only show one popup at a time
+      }
+    }
+  }
+
+  void _promptNewInterest(int cid, String categoryName) {
+    _isShowingInterestPopup = true;
+    _promptedCategoryIds.add(cid);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New Interest Detected'),
+        content: Text('New interest detected: $categoryName. Do you want to re-navigate?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() {
+                _isShowingInterestPopup = false;
+              });
+            },
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() {
+                if (!_userInterests.contains(categoryName)) {
+                  _userInterests.add(categoryName);
+                }
+                _isShowingInterestPopup = false;
+              });
+              
+              if (_isNavigating) {
+                _calculateRoute();
+              } else {
+                _toggleNavigation();
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _kMedBrown,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Yes'),
+          ),
+        ],
       ),
     );
   }
