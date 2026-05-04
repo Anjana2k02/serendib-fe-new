@@ -7,9 +7,11 @@ import '../../providers/dev_options_provider.dart';
 import '../../providers/artifact_provider.dart';
 import '../../widgets/category_artifacts_sheet.dart';
 import '../../widgets/navigation/dwell_time_overlay.dart';
+import '../../widgets/navigation/ai_chat_overlay.dart';
 import '../../models/route_graph.dart';
 import '../../services/geojson_route_service.dart';
 import '../../services/onboarding_api_service.dart';
+import '../../services/local_artifact_service.dart';
 
 // ---------------------------------------------------------------------------
 // Data models
@@ -206,8 +208,12 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
   }
 
   void _onCategoryTap(_MapLocation loc) {
-    final artifacts =
-        context.read<ArtifactProvider>().getArtifactsForLocation(loc.name);
+    // Use local CSV-based artifacts with real images as primary source.
+    // Fall back to API artifacts if local returns nothing.
+    final localArtifacts = LocalArtifactService.getByMapCategory(loc.name);
+    final artifacts = localArtifacts.isNotEmpty
+        ? localArtifacts
+        : context.read<ArtifactProvider>().getArtifactsForLocation(loc.name);
     showCategoryArtifactsSheet(context, loc.name, artifacts);
   }
 
@@ -677,6 +683,8 @@ class _IndoorMapScreenState extends State<IndoorMapScreen> {
                     ),
                     // Live dwell time overlay (bottom-right, developer option)
                     const DwellTimeOverlay(),
+                    // AI chat overlay (bottom-right)
+                    const AiChatOverlay(),
                   ],
                 ),
       floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,

@@ -81,6 +81,7 @@ flutter:
     - assets/artifacts/
     - assets/artifacts/base_data/
     - assets/artifacts/base_images/
+    - assets/artifacts/artiticats/
     - assets/user/
 
   # Add custom fonts here if needed

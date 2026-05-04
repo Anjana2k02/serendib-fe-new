@@ -4,17 +4,51 @@ import '../../core/theme/app_colors.dart';
 import '../../core/constants/app_constants.dart';
 import '../../providers/dev_options_provider.dart';
 
-/// Live dwell time overlay displayed at the bottom-right corner of the screen.
+/// Live dwell time overlay displayed over the map.
 /// Only visible when developer options are enabled and the user is in "Standing" mode
 /// near an artifact. Shows per-category accumulated dwell time in real time.
-class DwellTimeOverlay extends StatelessWidget {
+/// Can be dragged anywhere on screen.
+class DwellTimeOverlay extends StatefulWidget {
   const DwellTimeOverlay({super.key});
+
+  @override
+  State<DwellTimeOverlay> createState() => _DwellTimeOverlayState();
+}
+
+class _DwellTimeOverlayState extends State<DwellTimeOverlay> {
+  Offset? _pos; // null until first layout (initialised to bottom-right)
+
+  void _onPanUpdate(DragUpdateDetails details) {
+    final size = MediaQuery.of(context).size;
+    setState(() {
+      final current = _pos!;
+      _pos = Offset(
+        (current.dx + details.delta.dx).clamp(0, size.width - 20),
+        (current.dy + details.delta.dy).clamp(0, size.height - 20),
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<DevOptionsProvider>(
       builder: (context, devOptions, child) {
         if (!devOptions.developerOptionsEnabled) {
+          return const SizedBox.shrink();
+        }
+
+        // Initialise position to bottom-right on first visible render
+        if (_pos == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final size = MediaQuery.of(context).size;
+            setState(() {
+              _pos = Offset(
+                size.width - 256,
+                size.height - 220,
+              );
+            });
+          });
           return const SizedBox.shrink();
         }
 
@@ -25,57 +59,63 @@ class DwellTimeOverlay extends StatelessWidget {
         final allDwells = devOptions.allCategoryDwells;
 
         return Positioned(
-          bottom: AppConstants.spacingLg,
-          right: AppConstants.spacingMd,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 240),
-            decoration: BoxDecoration(
-              color: isStanding
-                  ? AppColors.darkBrown.withValues(alpha: 0.95)
-                  : Colors.grey.shade800.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(AppConstants.radiusMd),
-              border: Border.all(
+          left: _pos!.dx,
+          top: _pos!.dy,
+          child: GestureDetector(
+            onPanUpdate: _onPanUpdate,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 240),
+              decoration: BoxDecoration(
                 color: isStanding
-                    ? AppColors.accentGold.withValues(alpha: 0.6)
-                    : Colors.grey.shade600,
-                width: 1.5,
-              ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x55000000),
-                  blurRadius: 14,
-                  offset: Offset(0, 4),
+                    ? AppColors.darkBrown.withValues(alpha: 0.95)
+                    : Colors.grey.shade800.withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                border: Border.all(
+                  color: isStanding
+                      ? AppColors.accentGold.withValues(alpha: 0.6)
+                      : Colors.grey.shade600,
+                  width: 1.5,
                 ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Header ──
-                _Header(isStanding: isStanding, nearbyArtifact: nearbyArtifact),
-
-                // ── Active category timer ──
-                if (nearbyArtifact != null && nearbyCategoryId != null)
-                  _ActiveTimer(
-                    devOptions: devOptions,
-                    isStanding: isStanding,
-                    categoryId: nearbyCategoryId,
-                    artifactName: nearbyArtifact,
-                  ),
-
-                // ── History: all categories visited ──
-                if (allDwells.isNotEmpty) ...[
-                  const Divider(color: Colors.white12, height: 1),
-                  _CategoryHistory(
-                    entries: allDwells,
-                    activeCategoryId: nearbyCategoryId,
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x55000000),
+                    blurRadius: 14,
+                    offset: Offset(0, 4),
                   ),
                 ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Header ──
+                  _Header(
+                      isStanding: isStanding, nearbyArtifact: nearbyArtifact),
 
-                // ── Sync status ──
-                _SyncStatus(isStanding: isStanding, hasCategoryId: nearbyCategoryId != null),
-              ],
+                  // ── Active category timer ──
+                  if (nearbyArtifact != null && nearbyCategoryId != null)
+                    _ActiveTimer(
+                      devOptions: devOptions,
+                      isStanding: isStanding,
+                      categoryId: nearbyCategoryId,
+                      artifactName: nearbyArtifact,
+                    ),
+
+                  // ── History: all categories visited ──
+                  if (allDwells.isNotEmpty) ...[
+                    const Divider(color: Colors.white12, height: 1),
+                    _CategoryHistory(
+                      entries: allDwells,
+                      activeCategoryId: nearbyCategoryId,
+                    ),
+                  ],
+
+                  // ── Sync status ──
+                  _SyncStatus(
+                      isStanding: isStanding,
+                      hasCategoryId: nearbyCategoryId != null),
+                ],
+              ),
             ),
           ),
         );
@@ -107,7 +147,8 @@ class _Header extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.developer_mode, color: AppColors.accentGold, size: 13),
+          const Icon(Icons.developer_mode,
+              color: AppColors.accentGold, size: 13),
           const SizedBox(width: 5),
           const Text(
             'DWELL TRACKER',
@@ -119,7 +160,13 @@ class _Header extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          if (isStanding && nearbyArtifact != null) const _PulsingDot(),
+          // Drag hint icon
+          const Icon(Icons.drag_indicator,
+              color: Colors.white30, size: 14),
+          if (isStanding && nearbyArtifact != null) ...[
+            const SizedBox(width: 4),
+            const _PulsingDot(),
+          ],
         ],
       ),
     );
@@ -154,7 +201,8 @@ class _ActiveTimer extends StatelessWidget {
             children: [
               Icon(
                 isStanding ? Icons.timer : Icons.timer_off,
-                color: isStanding ? AppColors.accentGold : Colors.grey.shade500,
+                color:
+                    isStanding ? AppColors.accentGold : Colors.grey.shade500,
                 size: 20,
               ),
               const SizedBox(width: 6),

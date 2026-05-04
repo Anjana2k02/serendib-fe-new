@@ -248,23 +248,18 @@ class _CategoryArtifactCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Image placeholder
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: AppColors.primaryBrown.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(AppConstants.radiusSm),
-                  border: Border.all(
-                    color: AppColors.primaryBrown.withValues(alpha: 0.15),
-                    width: 1,
-                  ),
-                ),
-                child: const Icon(
-                  Icons.museum,
-                  color: AppColors.primaryBrown,
-                  size: 36,
-                ),
+              // Artifact image (local asset) or placeholder
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppConstants.radiusSm),
+                child: artifact.localImagePath != null
+                    ? Image.asset(
+                        artifact.localImagePath!,
+                        width: 72,
+                        height: 72,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _imagePlaceholder(),
+                      )
+                    : _imagePlaceholder(),
               ),
               const SizedBox(width: AppConstants.spacingMd),
 
@@ -339,6 +334,19 @@ class _CategoryArtifactCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _imagePlaceholder() {
+    return Container(
+      width: 72,
+      height: 72,
+      color: AppColors.primaryBrown.withValues(alpha: 0.1),
+      child: const Icon(
+        Icons.museum,
+        color: AppColors.primaryBrown,
+        size: 36,
       ),
     );
   }

@@ -12,6 +12,8 @@ class Artifact {
   final DateTime? updatedAt;
   final String? createdBy;
   final String? updatedBy;
+  /// Local asset image path (not from API). Set only for locally-sourced artifacts.
+  final String? localImagePath;
 
   Artifact({
     this.id,
@@ -27,6 +29,7 @@ class Artifact {
     this.updatedAt,
     this.createdBy,
     this.updatedBy,
+    this.localImagePath,
   });
 
   factory Artifact.fromJson(Map<String, dynamic> json) {
